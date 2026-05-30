@@ -1,0 +1,22 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "sektorId": "S-01",
+      "sektorName": "Area Loading Dock (Node 1)",
+      "picName": "Pak Budi",
+      "picPhone": "6281234567890",
+      "cameraSource": "0",
+      "enabled": true
+    },
+    {
+      "id": 1779523136839,
+      "sektorId": "S1",
+      "sektorName": "Sek1",
+      "picName": "s",
+      "picPhone": "6287853462867",
+      "cameraSource": "rtsp://192.168.88.10/live/ch00_1",
+      "enabled": true
+    }
+  ]
+}

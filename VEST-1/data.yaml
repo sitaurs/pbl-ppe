@@ -1,0 +1,10 @@
+train: E:\pycham pbl\VEST-1\train\images
+val: E:\pycham pbl\VEST-1\valid\images
+test: E:\pycham pbl\VEST-1\test\images
+
+nc: 4
+names:
+  0: helmet
+  1: no_helmet
+  2: vest
+  3: no_vest

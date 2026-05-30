@@ -1,0 +1,405 @@
+[
+  {
+    "id": 1779523014236,
+    "timestamp": "2026-05-23T07:56:54.236Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523135144,
+    "timestamp": "2026-05-23T07:58:55.144Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523256301,
+    "timestamp": "2026-05-23T08:00:56.301Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523377946,
+    "timestamp": "2026-05-23T08:02:57.946Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523498493,
+    "timestamp": "2026-05-23T08:04:58.493Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523618805,
+    "timestamp": "2026-05-23T08:06:58.805Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779523911640,
+    "timestamp": "2026-05-23T08:11:51.640Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779524031699,
+    "timestamp": "2026-05-23T08:13:51.699Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779524154698,
+    "timestamp": "2026-05-23T08:15:54.698Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1779524175139,
+    "timestamp": "2026-05-23T08:16:15.139Z",
+    "sektorId": "S1",
+    "sektorName": "Sek1",
+    "picName": "s",
+    "picPhone": "6287853462867",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "rtsp://192.168.88.10/live/ch00_1",
+    "waStatus": "sent"
+  },
+  {
+    "id": 1779524320177,
+    "timestamp": "2026-05-23T08:18:40.177Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780054898530,
+    "timestamp": "2026-05-29T11:41:38.531Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780061674508,
+    "timestamp": "2026-05-29T13:34:34.509Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780101669539,
+    "timestamp": "2026-05-30T00:41:09.539Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780101808832,
+    "timestamp": "2026-05-30T00:43:28.832Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780101929997,
+    "timestamp": "2026-05-30T00:45:29.997Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102052436,
+    "timestamp": "2026-05-30T00:47:32.436Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102177619,
+    "timestamp": "2026-05-30T00:49:37.619Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102297864,
+    "timestamp": "2026-05-30T00:51:37.864Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102422488,
+    "timestamp": "2026-05-30T00:53:42.488Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102572063,
+    "timestamp": "2026-05-30T00:56:12.063Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102730728,
+    "timestamp": "2026-05-30T00:58:50.728Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780102852204,
+    "timestamp": "2026-05-30T01:00:52.204Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780103170855,
+    "timestamp": "2026-05-30T01:06:10.855Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780103292124,
+    "timestamp": "2026-05-30T01:08:12.124Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780103300057,
+    "timestamp": "2026-05-30T01:08:20.057Z",
+    "sektorId": "S1",
+    "sektorName": "Sek1",
+    "picName": "s",
+    "picPhone": "6287853462867",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "rtsp://192.168.88.10/live/ch00_1",
+    "waStatus": "sent"
+  },
+  {
+    "id": 1780103813424,
+    "timestamp": "2026-05-30T01:16:53.424Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780104425766,
+    "timestamp": "2026-05-30T01:27:05.766Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780104543776,
+    "timestamp": "2026-05-30T01:29:03.776Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780104664851,
+    "timestamp": "2026-05-30T01:31:04.851Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  },
+  {
+    "id": 1780104786495,
+    "timestamp": "2026-05-30T01:33:06.495Z",
+    "sektorId": "S-01",
+    "sektorName": "Area Loading Dock (Node 1)",
+    "picName": "Pak Budi",
+    "picPhone": "6281234567890",
+    "violations": [
+      "missing helmet vest"
+    ],
+    "cameraSource": "0",
+    "waStatus": "failed"
+  }
+]

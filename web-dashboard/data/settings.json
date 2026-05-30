@@ -1,0 +1,35 @@
+{
+  "branding": {
+    "appName": "SafeGuard APD",
+    "companyName": "",
+    "logoUrl": "",
+    "primaryColor": "#e8720b"
+  },
+  "whatsapp": {
+    "enabled": true,
+    "serverUrl": "http://157.245.206.36:3000",
+    "username": "admin",
+    "password": "pbl_apd_2026!secure",
+    "deviceId": "pbl-alarm",
+    "cooldownSeconds": 120
+  },
+  "mqtt": {
+    "enabled": true,
+    "brokerUrl": "f559f825bedc477fa8b74e7375f66fd2.s1.eu.hivemq.cloud",
+    "port": 8883,
+    "username": "aldis",
+    "password": "Polinema2026",
+    "topicViolation": "APD_Violation"
+  },
+  "alarm": {
+    "enabled": true,
+    "audioUrl": "http://157.245.206.36/audio/jokowi.mp3",
+    "playCount": 4,
+    "cooldownSeconds": 5
+  },
+  "system": {
+    "websocketPort": 8765,
+    "confidenceThreshold": 0.65,
+    "personConfidence": 0.60
+  }
+}

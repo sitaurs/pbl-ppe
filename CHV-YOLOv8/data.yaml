@@ -1,0 +1,8 @@
+train: E:\pycham pbl\CHV-YOLOv8\train\images
+val: E:\pycham pbl\CHV-YOLOv8\valid\images
+test: E:\pycham pbl\CHV-YOLOv8\test\images
+
+nc: 2
+names:
+  0: helmet
+  1: vest
