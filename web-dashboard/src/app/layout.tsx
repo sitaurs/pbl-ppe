@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
+import '@/styles/node-tree-animations.css';
 import Link from 'next/link';
 import { LayoutDashboard, Monitor, AlertTriangle, Server, BarChart3 } from 'lucide-react';
 import LayoutShell from '@/components/LayoutShell';

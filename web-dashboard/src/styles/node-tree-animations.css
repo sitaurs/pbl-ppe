@@ -1,0 +1,340 @@
+/**
+ * Node Tree View — Animation Definitions
+ *
+ * Single source of truth for all node tree-related CSS animations and transitions.
+ * Consolidates expand/collapse, staggered items, hover highlights, status pulses,
+ * and respects prefers-reduced-motion.
+ *
+ * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
+ */
+
+/* ═══════════════════════════════════════════════════════════
+   Tree Expand / Collapse (300ms cubic-bezier, slide-down + fade-in + scale)
+   Requirement 6.1 — Enhanced with spring-like easing
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes node-tree-expand {
+  0% {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-8px) scaleY(0.95);
+    transform-origin: top center;
+  }
+  60% {
+    opacity: 0.8;
+    transform: translateY(2px) scaleY(1.01);
+  }
+  100% {
+    opacity: 1;
+    max-height: 800px;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes node-tree-collapse {
+  0% {
+    opacity: 1;
+    max-height: 800px;
+    transform: translateY(0) scaleY(1);
+    transform-origin: top center;
+  }
+  40% {
+    opacity: 0.6;
+    transform: translateY(-2px) scaleY(0.98);
+  }
+  100% {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-8px) scaleY(0.9);
+  }
+}
+
+.node-row__tree-container {
+  overflow: hidden;
+  animation: node-tree-expand 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.node-row__tree-container--collapsing {
+  animation: node-tree-collapse 250ms cubic-bezier(0.55, 0, 0.68, 0.5) forwards;
+}
+
+/* Chevron rotation transition — with spring overshoot */
+.node-row__chevron {
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.node-row__chevron--expanded {
+  transform: rotate(90deg);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Staggered Tree Items — Entry Animation (slide + fade + blur)
+   50ms delay per item, max 10 items
+   Requirement 6.3 — Enhanced with text reveal effect
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes tree-item-slide-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px) translateY(-4px);
+    filter: blur(2px);
+  }
+  60% {
+    opacity: 0.8;
+    filter: blur(0.5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Exit animation for tree items when collapsing */
+@keyframes tree-item-slide-out {
+  0% {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-8px) translateY(4px);
+    filter: blur(2px);
+  }
+}
+
+.tree-item-stagger {
+  opacity: 0;
+  animation: tree-item-slide-in 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Staggered delays — each item enters 60ms after the previous */
+.tree-item-stagger:nth-child(1) { animation-delay: 40ms; }
+.tree-item-stagger:nth-child(2) { animation-delay: 100ms; }
+.tree-item-stagger:nth-child(3) { animation-delay: 160ms; }
+.tree-item-stagger:nth-child(4) { animation-delay: 220ms; }
+.tree-item-stagger:nth-child(5) { animation-delay: 280ms; }
+.tree-item-stagger:nth-child(6) { animation-delay: 340ms; }
+.tree-item-stagger:nth-child(7) { animation-delay: 400ms; }
+.tree-item-stagger:nth-child(8) { animation-delay: 460ms; }
+.tree-item-stagger:nth-child(9) { animation-delay: 520ms; }
+.tree-item-stagger:nth-child(10) { animation-delay: 580ms; }
+
+/* Items beyond 10th appear instantly without stagger */
+.tree-item-stagger:nth-child(n+11) {
+  animation-delay: 0ms;
+  opacity: 1;
+}
+
+/* Exit animation class — applied by TreeSection when collapsing */
+.tree-item-exit {
+  animation: tree-item-slide-out 180ms cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+.tree-item-exit:nth-child(1) { animation-delay: 0ms; }
+.tree-item-exit:nth-child(2) { animation-delay: 30ms; }
+.tree-item-exit:nth-child(3) { animation-delay: 60ms; }
+.tree-item-exit:nth-child(4) { animation-delay: 90ms; }
+.tree-item-exit:nth-child(5) { animation-delay: 120ms; }
+.tree-item-exit:nth-child(6) { animation-delay: 150ms; }
+.tree-item-exit:nth-child(7) { animation-delay: 180ms; }
+.tree-item-exit:nth-child(8) { animation-delay: 210ms; }
+.tree-item-exit:nth-child(9) { animation-delay: 240ms; }
+.tree-item-exit:nth-child(10) { animation-delay: 270ms; }
+
+/* ═══════════════════════════════════════════════════════════
+   Row Hover Highlight (150ms transition, 5-8% opacity)
+   Requirement 6.2
+   ═══════════════════════════════════════════════════════════ */
+
+.node-row {
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.node-row:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.node-row--expanded {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Status Indicator Pulse Keyframes
+   Requirement 2.1 (1.5s online), 2.3 (3s degraded)
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes pulse-online {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes pulse-degraded {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+.animate-pulse-online {
+  animation: pulse-online 1.5s ease-in-out infinite;
+}
+
+.animate-pulse-degraded {
+  animation: pulse-degraded 3s ease-in-out infinite;
+}
+
+/* Status dot color transition on status change (400ms) */
+.status-indicator-dot {
+  transition: background-color 400ms ease;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Mobile Responsive Layout (<768px)
+   Requirements: 8.1, 8.2, 8.5, 8.6, 8.7
+   ═══════════════════════════════════════════════════════════ */
+
+@media (max-width: 767px) {
+  /* 8.1: Tree view as full-width expandable card below row */
+  .node-row__tree-container {
+    width: 100%;
+    border-radius: 8px;
+    background: var(--bg-secondary, #f9fafb);
+    border: 1px solid var(--border, #e5e7eb);
+    margin: 4px 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  /* Reduce tree indentation to 12px on mobile */
+  .tree-item {
+    padding-left: 12px !important;
+  }
+
+  .tree-section {
+    padding-left: 12px !important;
+  }
+
+  /* Tree content area: reduce left padding on mobile */
+  .node-row__tree-content {
+    padding-left: 16px !important;
+    padding-right: 12px !important;
+  }
+
+  /* 8.2: Minimum 44x44px touch targets for interactive elements */
+  .tree-section-header {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 4px;
+  }
+
+  .quick-action-button-wrapper button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 10px 16px;
+  }
+
+  /* Quick action buttons stack vertically (already handled inline but enforce) */
+  .node-tree-quick-actions {
+    flex-direction: column;
+    padding-left: 12px;
+    gap: 8px;
+  }
+
+  /* Node row action buttons - ensure touch target size on mobile */
+  .node-row td button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Reduced Motion — Disable all animations
+   Requirement 6.5
+   ═══════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .node-row__tree-container,
+  .node-row__tree-container--collapsing {
+    animation: none !important;
+    opacity: 1 !important;
+    max-height: none !important;
+    transform: none !important;
+  }
+
+  .node-row__chevron {
+    transition: none !important;
+  }
+
+  .node-row {
+    transition: none !important;
+  }
+
+  .tree-item-stagger,
+  .tree-item-exit {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .tree-section-items-exit > .tree-item-stagger,
+  .tree-section-items-exit > .node-tree-quick-actions {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  .animate-pulse-online,
+  .animate-pulse-degraded {
+    animation: none !important;
+  }
+
+  .status-indicator-dot {
+    transition: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Accessibility — Focus Indicators & Contrast
+   Requirements: 8.3, 8.4, 8.6
+   ═══════════════════════════════════════════════════════════ */
+
+/* 2px focus indicator on all interactive elements within node tree */
+.node-row:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Quick action buttons focus indicator */
+.quick-action-button-wrapper button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* Status indicator focus styling */
+.status-indicator-wrapper:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+/* Ensure aria-selected item has subtle visual distinction */
+[role="treeitem"][aria-selected="true"] {
+  background-color: rgba(59, 130, 246, 0.06);
+  border-radius: 4px;
+}

@@ -1,49 +1,78 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { Server, Plus, Trash2, X, MapPin, Phone, Search, Download, Pencil, Copy, Power, ChevronUp, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Server, Plus, Trash2, Search, Download, Power, ChevronUp, ChevronDown } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
-
-interface NodeData {
-  id: number;
-  sektorId: string;
-  sektorName: string;
-  picName: string;
-  picPhone: string;
-  cameraSource: string;
-  enabled: boolean;
-}
+import NodeTable from '@/components/nodes/NodeTable';
+import NodeWizard from '@/components/wizard/NodeWizard';
+import LivePreviewPanel from '@/components/nodes/LivePreviewPanel';
+import type { NodeData } from '@/lib/node-types';
 
 type SortKey = 'sektorId' | 'sektorName' | 'cameraSource' | 'picName' | 'picPhone' | 'enabled';
 type SortDir = 'asc' | 'desc';
 
+/**
+ * NodesPage — Main page for managing nodes (/nodes).
+ *
+ * Integrates:
+ * - NodeTable with expandable tree view, health scores, and status polling
+ * - NodeWizard for add/edit flows (multi-step wizard)
+ * - LivePreviewPanel for camera streaming (singleton)
+ * - Bulk actions, search, sort, and export functionality
+ *
+ * Data flow:
+ * - Fetches nodes from GET /api/nodes on load (migration applied server-side)
+ * - Add node: opens wizard in "add" mode → POST /api/nodes → refresh list
+ * - Edit node: opens wizard in "edit" mode with initialData → PUT /api/nodes/[id] → refresh list
+ * - Delete: confirmation dialog → DELETE /api/nodes/[id] → refresh list
+ * - Duplicate: POST /api/nodes with copied data → refresh list
+ * - Toggle enabled: PUT /api/nodes/[id] with toggled enabled → refresh list
+ *
+ * Requirements: 1.1, 4.10, 9.2
+ */
 export default function NodesPage() {
+  // --- Data State ---
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // --- Search & Sort ---
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editNode, setEditNode] = useState<NodeData | null>(null);
-  const [form, setForm] = useState({
-    sektorId: '',
-    sektorName: '',
-    cameraSource: '0',
-    picName: '',
-    picPhone: '62'
-  });
 
-  useEffect(() => { fetchNodes(); }, []);
+  // --- Selection (for bulk actions) ---
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // --- Wizard State ---
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardMode, setWizardMode] = useState<'add' | 'edit'>('add');
+  const [wizardInitialData, setWizardInitialData] = useState<Partial<NodeData> | undefined>(undefined);
+  const [editingNodeId, setEditingNodeId] = useState<number | null>(null);
+
+  // --- Live Preview ---
+  const [livePreviewNodeId, setLivePreviewNodeId] = useState<number | null>(null);
+
+  // --- Data Fetching ---
+  useEffect(() => {
+    fetchNodes();
+  }, []);
 
   const fetchNodes = async () => {
     try {
+      setLoading(true);
       const res = await fetch('/api/nodes');
-      if (res.ok) setNodes(await res.json());
-    } catch {} finally { setLoading(false); }
+      if (res.ok) {
+        const data = await res.json();
+        setNodes(data);
+      }
+    } catch {
+      // Silent fail — nodes remain empty
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Search filter
+  // --- Search Filter ---
   const filteredNodes = useMemo(() => {
     if (!searchQuery.trim()) return nodes;
     const q = searchQuery.toLowerCase();
@@ -54,7 +83,7 @@ export default function NodesPage() {
     );
   }, [nodes, searchQuery]);
 
-  // Sort
+  // --- Sort ---
   const sortedNodes = useMemo(() => {
     if (!sortKey) return filteredNodes;
     return [...filteredNodes].sort((a, b) => {
@@ -75,14 +104,7 @@ export default function NodesPage() {
     }
   };
 
-  const SortArrow = ({ column }: { column: SortKey }) => (
-    <span className="inline-flex flex-col ml-1 leading-none text-[9px]" style={{ color: sortKey === column ? 'var(--accent)' : 'var(--text-muted)' }}>
-      <ChevronUp size={10} strokeWidth={sortKey === column && sortDir === 'asc' ? 3 : 1.5} />
-      <ChevronDown size={10} strokeWidth={sortKey === column && sortDir === 'desc' ? 3 : 1.5} />
-    </span>
-  );
-
-  // Selection
+  // --- Selection ---
   const allFilteredSelected = sortedNodes.length > 0 && sortedNodes.every(n => selectedIds.has(n.id));
 
   const toggleSelectAll = () => {
@@ -99,95 +121,151 @@ export default function NodesPage() {
     setSelectedIds(next);
   };
 
-  // CRUD handlers
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch('/api/nodes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
-      });
-      if (res.ok) {
-        setShowAddModal(false);
-        setForm({ sektorId: '', sektorName: '', cameraSource: '0', picName: '', picPhone: '62' });
-        fetchNodes();
-      }
-    } catch {}
-  };
+  // --- Wizard Handlers ---
 
-  const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editNode) return;
-    try {
-      const res = await fetch(`/api/nodes/${editNode.id}`, {
+  /** Open wizard in "add" mode */
+  const handleOpenAddWizard = useCallback(() => {
+    setWizardMode('add');
+    setWizardInitialData(undefined);
+    setEditingNodeId(null);
+    setWizardOpen(true);
+  }, []);
+
+  /** Open wizard in "edit" mode with node data */
+  const handleOpenEditWizard = useCallback((node: NodeData) => {
+    setWizardMode('edit');
+    setWizardInitialData(node);
+    setEditingNodeId(node.id);
+    setWizardOpen(true);
+  }, []);
+
+  /** Close wizard */
+  const handleCloseWizard = useCallback(() => {
+    setWizardOpen(false);
+    setWizardInitialData(undefined);
+    setEditingNodeId(null);
+  }, []);
+
+  /**
+   * Handle wizard save — POST (add) or PUT (edit) to API, then refresh node list.
+   * Requirement 4.10: save, close wizard, and show updated list within 2s.
+   */
+  const handleWizardSave = useCallback(async (data: Omit<NodeData, 'id'>) => {
+    if (wizardMode === 'edit' && editingNodeId !== null) {
+      // PUT existing node
+      const res = await fetch(`/api/nodes/${editingNodeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(data),
       });
-      if (res.ok) {
-        setEditNode(null);
-        fetchNodes();
+      if (!res.ok) {
+        throw new Error('Failed to update node');
       }
-    } catch {}
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm('Hapus node ini?')) return;
-    try {
-      await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
-      selectedIds.delete(id);
-      setSelectedIds(new Set(selectedIds));
-      fetchNodes();
-    } catch {}
-  };
-
-  const handleDuplicate = async (node: NodeData) => {
-    try {
+    } else {
+      // POST new node
       const res = await fetch('/api/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sektorId: node.sektorId,
-          sektorName: `${node.sektorName} (Copy)`,
-          picName: node.picName,
-          picPhone: node.picPhone,
-          cameraSource: node.cameraSource
-        })
+        body: JSON.stringify(data),
       });
-      if (res.ok) fetchNodes();
-    } catch {}
-  };
+      if (!res.ok) {
+        throw new Error('Failed to create node');
+      }
+    }
 
-  const handleToggleEnabled = async (node: NodeData) => {
+    // Close wizard and refresh list
+    handleCloseWizard();
+    await fetchNodes();
+  }, [wizardMode, editingNodeId, handleCloseWizard]);
+
+  // --- Node Actions ---
+
+  /** Delete node with confirmation */
+  const handleDelete = useCallback(async (nodeId: number) => {
+    if (!confirm('Hapus node ini?')) return;
+    try {
+      await fetch(`/api/nodes/${nodeId}`, { method: 'DELETE' });
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
+      await fetchNodes();
+    } catch {
+      // Silent fail
+    }
+  }, []);
+
+  /** Duplicate node */
+  const handleDuplicate = useCallback(async (node: NodeData) => {
+    try {
+      const duplicateData = {
+        sektorId: node.sektorId,
+        sektorName: `${node.sektorName} (Copy)`,
+        picName: node.picName,
+        picPhone: node.picPhone,
+        cameraSource: node.cameraSource,
+        camera: node.camera,
+        esp32: node.esp32,
+        detection: node.detection,
+        enabled: node.enabled,
+      };
+      const res = await fetch('/api/nodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(duplicateData),
+      });
+      if (res.ok) await fetchNodes();
+    } catch {
+      // Silent fail
+    }
+  }, []);
+
+  /** Toggle node enabled/disabled */
+  const handleToggleEnabled = useCallback(async (node: NodeData) => {
     try {
       await fetch(`/api/nodes/${node.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !node.enabled })
+        body: JSON.stringify({ enabled: !node.enabled }),
       });
-      fetchNodes();
-    } catch {}
-  };
+      await fetchNodes();
+    } catch {
+      // Silent fail
+    }
+  }, []);
 
-  // Bulk actions
+  // --- Live Preview ---
+  const handleViewLive = useCallback((nodeId: number) => {
+    setLivePreviewNodeId(nodeId);
+  }, []);
+
+  const handleCloseLivePreview = useCallback(() => {
+    setLivePreviewNodeId(null);
+  }, []);
+
+  // --- Bulk Actions ---
   const handleBulk = async (action: 'delete' | 'enable' | 'disable') => {
     if (action === 'delete' && !confirm(`Hapus ${selectedIds.size} node?`)) return;
     try {
       await fetch('/api/nodes/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ids: Array.from(selectedIds) })
+        body: JSON.stringify({ action, ids: Array.from(selectedIds) }),
       });
       setSelectedIds(new Set());
-      fetchNodes();
-    } catch {}
+      await fetchNodes();
+    } catch {
+      // Silent fail
+    }
   };
 
-  // Export CSV
+  // --- Export CSV ---
   const exportCSV = () => {
     const headers = ['sektorId', 'sektorName', 'picName', 'picPhone', 'cameraSource', 'enabled'];
-    const rows = nodes.map(n => headers.map(h => `"${String((n as any)[h]).replace(/"/g, '""')}"`).join(','));
+    const rows = nodes.map(n =>
+      headers.map(h => `"${String((n as unknown as Record<string, unknown>)[h]).replace(/"/g, '""')}"`).join(',')
+    );
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -198,16 +276,13 @@ export default function NodesPage() {
     URL.revokeObjectURL(url);
   };
 
-  const openEditModal = (node: NodeData) => {
-    setEditNode(node);
-    setForm({
-      sektorId: node.sektorId,
-      sektorName: node.sektorName,
-      cameraSource: node.cameraSource,
-      picName: node.picName,
-      picPhone: node.picPhone
-    });
-  };
+  // --- Sort Arrow UI ---
+  const SortArrow = ({ column }: { column: SortKey }) => (
+    <span className="inline-flex flex-col ml-1 leading-none text-[9px]" style={{ color: sortKey === column ? 'var(--accent)' : 'var(--text-muted)' }}>
+      <ChevronUp size={10} strokeWidth={sortKey === column && sortDir === 'asc' ? 3 : 1.5} />
+      <ChevronDown size={10} strokeWidth={sortKey === column && sortDir === 'desc' ? 3 : 1.5} />
+    </span>
+  );
 
   return (
     <PageTransition>
@@ -218,10 +293,18 @@ export default function NodesPage() {
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Manajemen node kamera & sektor</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button onClick={exportCSV} className="flex items-center gap-2 min-h-[44px] px-3 py-2 rounded-lg font-medium text-sm transition-all" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }} title="Export CSV">
+          <button
+            onClick={exportCSV}
+            className="flex items-center gap-2 min-h-[44px] px-3 py-2 rounded-lg font-medium text-sm transition-all"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+            title="Export CSV"
+          >
             <Download size={14} /> Export
           </button>
-          <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-2 min-h-[44px]">
+          <button
+            onClick={handleOpenAddWizard}
+            className="btn-primary flex items-center gap-2 min-h-[44px]"
+          >
             <Plus size={14} /> Tambah Node
           </button>
         </div>
@@ -245,22 +328,36 @@ export default function NodesPage() {
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (
         <div className="stagger-item mb-4 p-3 rounded-lg flex flex-wrap items-center gap-2" style={{ background: '#f0f4fa', border: '1px solid var(--border)' }}>
-          <span className="text-sm font-medium mr-2" style={{ color: 'var(--text-secondary)' }}>{selectedIds.size} dipilih</span>
+          <span className="text-sm font-medium mr-2" style={{ color: 'var(--text-secondary)' }}>
+            {selectedIds.size} dipilih
+          </span>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => handleBulk('delete')} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all" style={{ background: '#fef2f2', color: 'var(--danger)', border: '1px solid #fecaca' }}>
+            <button
+              onClick={() => handleBulk('delete')}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all"
+              style={{ background: '#fef2f2', color: 'var(--danger)', border: '1px solid #fecaca' }}
+            >
               <Trash2 size={12} /> Hapus ({selectedIds.size})
             </button>
-            <button onClick={() => handleBulk('disable')} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all" style={{ background: '#f5f5f5', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+            <button
+              onClick={() => handleBulk('disable')}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all"
+              style={{ background: '#f5f5f5', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            >
               <Power size={12} /> Nonaktifkan
             </button>
-            <button onClick={() => handleBulk('enable')} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all" style={{ background: '#e8ecf5', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+            <button
+              onClick={() => handleBulk('enable')}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold min-h-[44px] transition-all"
+              style={{ background: '#e8ecf5', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+            >
               <Power size={12} /> Aktifkan
             </button>
           </div>
         </div>
       )}
 
-      {/* Table */}
+      {/* Main Content: NodeTable or Empty/Loading States */}
       <div className="card overflow-hidden stagger-item stagger-3">
         {loading ? (
           <div className="p-6 space-y-3">
@@ -281,11 +378,11 @@ export default function NodesPage() {
               </div>
               <div className="flex items-start gap-3">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'var(--accent)' }}>2</span>
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Isi data sektor dan sumber kamera</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Isi data sektor dan konfigurasi kamera/ESP32</span>
               </div>
               <div className="flex items-start gap-3">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'var(--accent)' }}>3</span>
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Assign PIC beserta nomor WA</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Review konfigurasi dan simpan node baru</span>
               </div>
             </div>
           </div>
@@ -295,119 +392,15 @@ export default function NodesPage() {
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Tidak ditemukan node yang cocok dengan pencarian.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="text-center px-3 py-3 w-10">
-                    <span
-                      onClick={toggleSelectAll}
-                      className="inline-flex items-center justify-center w-[44px] h-[44px] rounded cursor-pointer transition-all"
-                    >
-                      <span
-                        className="inline-flex items-center justify-center w-[18px] h-[18px] rounded border-2 transition-all"
-                        style={{
-                          borderColor: allFilteredSelected ? 'var(--accent)' : 'var(--border-strong)',
-                          background: allFilteredSelected ? 'var(--accent)' : 'transparent'
-                        }}
-                      >
-                        {allFilteredSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                      </span>
-                    </span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('sektorId')}>
-                    <span className="inline-flex items-center">ID Sektor <SortArrow column="sektorId" /></span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('sektorName')}>
-                    <span className="inline-flex items-center">Nama Sektor <SortArrow column="sektorName" /></span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('cameraSource')}>
-                    <span className="inline-flex items-center">Sumber Kamera <SortArrow column="cameraSource" /></span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('picName')}>
-                    <span className="inline-flex items-center">PIC <SortArrow column="picName" /></span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('picPhone')}>
-                    <span className="inline-flex items-center">No WA <SortArrow column="picPhone" /></span>
-                  </th>
-                  <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => handleSort('enabled')}>
-                    <span className="inline-flex items-center">Status <SortArrow column="enabled" /></span>
-                  </th>
-                  <th className="text-center px-4 py-3">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedNodes.map((node) => (
-                  <tr key={node.id} className={selectedIds.has(node.id) ? '!bg-blue-50/50' : ''}>
-                    <td className="text-center px-3 py-3">
-                      <span
-                        onClick={() => toggleSelect(node.id)}
-                        className="inline-flex items-center justify-center w-[44px] h-[44px] rounded cursor-pointer transition-all"
-                      >
-                        <span
-                          className="inline-flex items-center justify-center w-[18px] h-[18px] rounded border-2 transition-all"
-                          style={{
-                            borderColor: selectedIds.has(node.id) ? 'var(--accent)' : 'var(--border-strong)',
-                            background: selectedIds.has(node.id) ? 'var(--accent)' : 'transparent'
-                          }}
-                        >
-                          {selectedIds.has(node.id) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: 'var(--accent)', color: 'white' }}>
-                        {node.sektorId}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium">{node.sektorName}</td>
-                    <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{node.cameraSource}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <MapPin size={12} style={{ color: 'var(--accent)' }} />
-                        {node.picName}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Phone size={12} style={{ color: 'var(--orange)' }} />
-                        <span className="font-mono text-xs">{node.picPhone}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {node.enabled ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-                          <span className="w-2 h-2 rounded-full animate-pulse-dot" style={{ background: 'var(--accent)' }} />
-                          Aktif
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                          <span className="w-2 h-2 rounded-full" style={{ background: 'var(--text-muted)' }} />
-                          Nonaktif
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => openEditModal(node)} className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center" title="Edit" style={{ color: 'var(--accent)' }}>
-                          <Pencil size={14} />
-                        </button>
-                        <button onClick={() => handleDuplicate(node)} className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center" title="Duplikat" style={{ color: 'var(--text-secondary)' }}>
-                          <Copy size={14} />
-                        </button>
-                        <button onClick={() => handleToggleEnabled(node)} className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center" title={node.enabled ? 'Nonaktifkan' : 'Aktifkan'} style={{ color: node.enabled ? 'var(--orange)' : 'var(--text-muted)' }}>
-                          <Power size={14} />
-                        </button>
-                        <button onClick={() => handleDelete(node.id)} className="btn-danger p-2 min-w-[44px] min-h-[44px] flex items-center justify-center" title="Hapus">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          /* NodeTable with tree view, health scores, and status polling */
+          <NodeTable
+            nodes={sortedNodes}
+            onEdit={handleOpenEditWizard}
+            onDuplicate={handleDuplicate}
+            onToggleEnabled={handleToggleEnabled}
+            onDelete={handleDelete}
+            onViewLive={handleViewLive}
+          />
         )}
       </div>
 
@@ -419,94 +412,22 @@ export default function NodesPage() {
         </div>
       )}
 
-      {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(26,26,46,0.5)' }} onClick={() => setShowAddModal(false)}>
-          <div className="card p-5 md:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Tambah Node</h2>
-              <button onClick={() => setShowAddModal(false)} className="p-2 rounded-lg hover:bg-black/5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center">
-                <X size={18} style={{ color: 'var(--text-muted)' }} />
-              </button>
-            </div>
-            <form onSubmit={handleAdd} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>ID Sektor</label>
-                  <input value={form.sektorId} onChange={e => setForm({...form, sektorId: e.target.value})} placeholder="S-01" required className="w-full" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nama Sektor</label>
-                  <input value={form.sektorName} onChange={e => setForm({...form, sektorName: e.target.value})} placeholder="Area Gudang" required className="w-full" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Sumber Kamera</label>
-                <input value={form.cameraSource} onChange={e => setForm({...form, cameraSource: e.target.value})} placeholder="rtsp://... atau 0" required className="w-full" />
-                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Gunakan "0" untuk webcam lokal, atau URL RTSP untuk IP Camera (contoh: rtsp://192.168.1.10/live/ch00_1)</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nama PIC</label>
-                  <input value={form.picName} onChange={e => setForm({...form, picName: e.target.value})} placeholder="Pak Budi" required className="w-full" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>No WA PIC</label>
-                  <input value={form.picPhone} onChange={e => setForm({...form, picPhone: e.target.value})} placeholder="628xxx" required className="w-full" />
-                </div>
-              </div>
-              <div className="flex gap-3 pt-3">
-                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2.5 rounded-lg font-medium text-sm min-h-[44px]" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>Batal</button>
-                <button type="submit" className="flex-1 btn-primary min-h-[44px]">Simpan</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Node Wizard (Add/Edit) */}
+      {wizardOpen && (
+        <NodeWizard
+          mode={wizardMode}
+          initialData={wizardInitialData}
+          onSave={handleWizardSave}
+          onClose={handleCloseWizard}
+        />
       )}
 
-      {/* Edit Modal */}
-      {editNode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(26,26,46,0.5)' }} onClick={() => setEditNode(null)}>
-          <div className="card p-5 md:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Edit Node — {editNode.sektorName}</h2>
-              <button onClick={() => setEditNode(null)} className="p-2 rounded-lg hover:bg-black/5 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center">
-                <X size={18} style={{ color: 'var(--text-muted)' }} />
-              </button>
-            </div>
-            <form onSubmit={handleEdit} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>ID Sektor</label>
-                  <input value={form.sektorId} onChange={e => setForm({...form, sektorId: e.target.value})} placeholder="S-01" required className="w-full" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nama Sektor</label>
-                  <input value={form.sektorName} onChange={e => setForm({...form, sektorName: e.target.value})} placeholder="Area Gudang" required className="w-full" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Sumber Kamera</label>
-                <input value={form.cameraSource} onChange={e => setForm({...form, cameraSource: e.target.value})} placeholder="rtsp://... atau 0" required className="w-full" />
-                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Gunakan "0" untuk webcam lokal, atau URL RTSP untuk IP Camera</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nama PIC</label>
-                  <input value={form.picName} onChange={e => setForm({...form, picName: e.target.value})} placeholder="Pak Budi" required className="w-full" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>No WA PIC</label>
-                  <input value={form.picPhone} onChange={e => setForm({...form, picPhone: e.target.value})} placeholder="628xxx" required className="w-full" />
-                </div>
-              </div>
-              <div className="flex gap-3 pt-3">
-                <button type="button" onClick={() => setEditNode(null)} className="flex-1 px-4 py-2.5 rounded-lg font-medium text-sm min-h-[44px]" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>Batal</button>
-                <button type="submit" className="flex-1 btn-primary min-h-[44px]">Simpan Perubahan</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Live Preview Panel (Singleton) */}
+      {livePreviewNodeId !== null && (
+        <LivePreviewPanel
+          nodeId={livePreviewNodeId}
+          onClose={handleCloseLivePreview}
+        />
       )}
     </PageTransition>
   );
