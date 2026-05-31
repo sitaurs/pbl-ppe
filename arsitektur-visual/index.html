@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arsitektur SafeGuard APD — Visualisasi Interaktif</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="badge">PBL · Pengolahan Citra · Keamanan Jaringan · IoT WSN</div>
+    <h1>SafeGuard APD</h1>
+    <p class="subtitle">Sistem deteksi pelanggaran APD dengan YOLOv8, alarm ESP32, dan notifikasi WhatsApp</p>
+    <p class="explainer">
+      Halaman ini memvisualisasikan cara kerja sistem secara interaktif. Jalankan animasi alur data di bawah
+      untuk memahami komunikasi antar komponen tanpa perlu membaca panjang. Klik komponen pada diagram untuk detail.
+    </p>
+    <div class="hero-actions">
+      <a href="#playground" class="hero-btn hero-btn-primary">Jalankan Animasi</a>
+      <a href="#diagram" class="hero-btn">Lihat Diagram</a>
+    </div>
+  </div>
+</header>
+
+<nav class="quick-nav">
+  <a href="#playground">Animasi Alur</a>
+  <a href="#diagram">Diagram</a>
+  <a href="#components">Komponen</a>
+  <a href="#tasks-table">Pembagian Tugas</a>
+  <a href="#start-guide">Cara Menjalankan</a>
+  <a href="#faq">FAQ</a>
+</nav>
+
+<main>
+
+<!-- ============================================================ -->
+<!-- ANIMASI ALUR (PLAYGROUND) -->
+<!-- ============================================================ -->
+<section class="container" id="playground">
+  <h2>1. Animasi Alur Data</h2>
+  <p>Pilih skenario, tekan Putar, dan amati bagaimana paket data bergerak antar komponen secara real-time.</p>
+
+  <div class="player-tabs" id="playerTabs">
+    <button class="ptab active" data-flow="login">Login Pengguna</button>
+    <button class="ptab" data-flow="detect">Deteksi Pelanggaran</button>
+    <button class="ptab" data-flow="monitor">Live Monitor</button>
+    <button class="ptab" data-flow="wizard">Tambah Node</button>
+  </div>
+
+  <div class="stage-wrap">
+    <!-- SVG stage: nodes + animated packets -->
+    <div class="stage" id="stage">
+      <!-- Connection lines drawn by SVG -->
+      <svg class="wires" id="wires" viewBox="0 0 1000 460" preserveAspectRatio="xMidYMid meet"></svg>
+
+      <!-- Component boxes (absolute positioned, percentages) -->
+      <div class="cnode" id="n-browser" style="left:3%; top:38%;">
+        <div class="cnode-ico">🧑‍💻</div>
+        <div class="cnode-name">Browser</div>
+        <div class="cnode-sub">Pengguna</div>
+      </div>
+
+      <div class="cnode" id="n-mw" style="left:27%; top:10%;">
+        <div class="cnode-ico">🛡️</div>
+        <div class="cnode-name">Middleware</div>
+        <div class="cnode-sub">Auth · CSRF · RBAC</div>
+      </div>
+
+      <div class="cnode" id="n-api" style="left:27%; top:66%;">
+        <div class="cnode-ico">⚙️</div>
+        <div class="cnode-name">API Route</div>
+        <div class="cnode-sub">Next.js /api/*</div>
+      </div>
+
+      <div class="cnode" id="n-db" style="left:51%; top:66%;">
+        <div class="cnode-ico">🗄️</div>
+        <div class="cnode-name">SQLite</div>
+        <div class="cnode-sub">Prisma</div>
+      </div>
+
+      <div class="cnode" id="n-python" style="left:51%; top:10%;">
+        <div class="cnode-ico">🐍</div>
+        <div class="cnode-name">Python YOLO</div>
+        <div class="cnode-sub">Deteksi</div>
+      </div>
+
+      <div class="cnode" id="n-cam" style="left:75%; top:4%;">
+        <div class="cnode-ico">📹</div>
+        <div class="cnode-name">Kamera</div>
+        <div class="cnode-sub">RTSP / Webcam</div>
+      </div>
+
+      <div class="cnode" id="n-mqtt" style="left:75%; top:34%;">
+        <div class="cnode-ico">📡</div>
+        <div class="cnode-name">MQTT</div>
+        <div class="cnode-sub">HiveMQ</div>
+      </div>
+
+      <div class="cnode" id="n-esp" style="left:90%; top:34%;">
+        <div class="cnode-ico">🔔</div>
+        <div class="cnode-name">ESP32</div>
+        <div class="cnode-sub">Alarm</div>
+      </div>
+
+      <div class="cnode" id="n-gowa" style="left:75%; top:64%;">
+        <div class="cnode-ico">💬</div>
+        <div class="cnode-name">GoWA</div>
+        <div class="cnode-sub">WhatsApp</div>
+      </div>
+
+      <!-- moving packet -->
+      <div class="packet" id="packet"></div>
+    </div>
+
+    <!-- Step narration -->
+    <aside class="narration">
+      <div class="narration-head">
+        <span class="flow-title" id="flowTitle">Login Pengguna</span>
+        <span class="step-counter" id="stepCounter">0 / 0</span>
+      </div>
+      <div class="narration-body" id="narrationBody">
+        Tekan <strong>Putar</strong> untuk memulai animasi.
+      </div>
+      <div class="player-controls">
+        <button id="btnPlay" class="pc-btn pc-btn-primary">▶ Putar</button>
+        <button id="btnStep" class="pc-btn">Langkah ›</button>
+        <button id="btnReset" class="pc-btn">Ulang</button>
+      </div>
+      <label class="speed-row">
+        Kecepatan
+        <input type="range" id="speed" min="1" max="3" step="1" value="2">
+      </label>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 2 APLIKASI -->
+<!-- ============================================================ -->
+<section class="container">
+  <h2>2. Dua Aplikasi Utama</h2>
+  <p>Seluruh sistem berjalan dari dua proses di satu laptop, ditambah perangkat dan layanan pendukung.</p>
+  <div class="two-apps">
+    <div class="app-card app-nextjs">
+      <div class="app-header">
+        <div class="app-num">1</div>
+        <div><h3>Next.js</h3><code>npm run start</code></div>
+      </div>
+      <p class="app-desc">Satu proses, port 3000. Frontend dan backend web menjadi satu:</p>
+      <ul>
+        <li>Halaman antarmuka (React)</li>
+        <li>API <code>/api/*</code></li>
+        <li>Login, sesi, RBAC</li>
+        <li>Database SQLite via Prisma</li>
+        <li>Audit log</li>
+      </ul>
+    </div>
+    <div class="app-card app-python">
+      <div class="app-header">
+        <div class="app-num">2</div>
+        <div><h3>Python YOLO</h3><code>python ServiceAPDBackend.py</code></div>
+      </div>
+      <p class="app-desc">Satu proses. Kecerdasan deteksi dan komunikasi perangkat:</p>
+      <ul>
+        <li>Tangkap frame kamera (RTSP / webcam)</li>
+        <li>Inferensi YOLOv8 helm dan rompi</li>
+        <li>Siaran frame via WebSocket port 8765</li>
+        <li>Notifikasi WhatsApp ke PIC</li>
+        <li>Alarm MQTT ke ESP32</li>
+        <li>Lapor pelanggaran ke Next.js</li>
+      </ul>
+    </div>
+  </div>
+  <div class="info-box">
+    <strong>Mengapa hanya dua aplikasi?</strong>
+    <p>Next.js adalah framework fullstack, sehingga frontend dan backend web berjalan dalam satu proses dengan satu port. Tidak perlu server terpisah untuk API.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- DIAGRAM INTERAKTIF -->
+<!-- ============================================================ -->
+<section class="container" id="diagram">
+  <h2>3. Diagram Komponen</h2>
+  <p>Klik komponen untuk melihat detail tugas, port, dan jalur komunikasinya.</p>
+  <div class="diagram-wrapper">
+    <div class="diagram">
+      <div class="layer layer-internet">
+        <div class="layer-title">Internet dan Layanan Eksternal</div>
+        <div class="layer-row">
+          <div class="component" data-component="browser"><div class="comp-icon">🧑‍💻</div><div class="comp-name">Browser</div><div class="comp-meta">Pengguna</div></div>
+          <div class="component" data-component="cf"><div class="comp-icon">☁️</div><div class="comp-name">Cloudflare Edge</div><div class="comp-meta">TLS · Tunnel</div></div>
+          <div class="component" data-component="gowa"><div class="comp-icon">💬</div><div class="comp-name">GoWA VPS</div><div class="comp-meta">WhatsApp</div></div>
+          <div class="component" data-component="hivemq"><div class="comp-icon">📡</div><div class="comp-name">HiveMQ</div><div class="comp-meta">MQTT TLS</div></div>
+        </div>
+      </div>
+      <div class="layer layer-laptop">
+        <div class="layer-title">Laptop NVIDIA</div>
+        <div class="layer-row">
+          <div class="component component-large" data-component="nextjs"><div class="comp-icon">⚙️</div><div class="comp-name">Next.js</div><div class="comp-meta">port 3000</div></div>
+          <div class="component component-large" data-component="python"><div class="comp-icon">🐍</div><div class="comp-name">Python YOLO</div><div class="comp-meta">WS 8765</div></div>
+        </div>
+        <div class="layer-row">
+          <div class="component" data-component="sqlite"><div class="comp-icon">🗄️</div><div class="comp-name">SQLite</div><div class="comp-meta">safeguard.db</div></div>
+          <div class="component" data-component="cloudflared"><div class="comp-icon">🚪</div><div class="comp-name">cloudflared</div><div class="comp-meta">Windows Service</div></div>
+        </div>
+      </div>
+      <div class="layer layer-hardware">
+        <div class="layer-title">Perangkat Keras</div>
+        <div class="layer-row">
+          <div class="component" data-component="ipcam"><div class="comp-icon">📹</div><div class="comp-name">Kamera</div><div class="comp-meta">RTSP / Webcam</div></div>
+          <div class="component" data-component="esp32"><div class="comp-icon">🔔</div><div class="comp-name">ESP32</div><div class="comp-meta">Alarm</div></div>
+        </div>
+      </div>
+    </div>
+    <aside class="detail-panel" id="detailPanel">
+      <h3>Klik komponen di diagram</h3>
+      <p class="hint">Pilih salah satu komponen untuk melihat detail.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- KOMPONEN DETAIL -->
+<!-- ============================================================ -->
+<section class="container" id="components">
+  <h2>4. Tugas Tiap Komponen</h2>
+  <div class="comp-grid">
+    <article class="comp-card">
+      <h3><span class="dot dot-blue"></span>Next.js</h3>
+      <p class="caption">Menangani seluruh antarmuka dan API web.</p>
+      <ul class="task-list">
+        <li>Render halaman: login, dashboard, monitor, pelanggaran, node, pengguna, peran, sektor, audit log</li>
+        <li>Verifikasi password Argon2id saat login</li>
+        <li>Buat sesi dan token CSRF</li>
+        <li>Periksa RBAC: 5 peran, 34 izin</li>
+        <li>Filter data per sektor untuk Supervisor dan PIC</li>
+        <li>Audit log otomatis</li>
+        <li>Uji koneksi RTSP dan MQTT</li>
+        <li>Pembatasan login dan 2FA TOTP</li>
+      </ul>
+    </article>
+    <article class="comp-card">
+      <h3><span class="dot dot-orange"></span>Python YOLO</h3>
+      <p class="caption">Menangani deteksi AI dan komunikasi perangkat.</p>
+      <ul class="task-list">
+        <li>Tangkap frame dari RTSP atau webcam</li>
+        <li>Resize frame ke 720px untuk efisiensi</li>
+        <li>Inferensi YOLOv8 helm dan rompi</li>
+        <li>Inferensi deteksi orang (model terpisah)</li>
+        <li>Cross-check orang dengan APD via overlap kotak</li>
+        <li>Gambar penanda merah untuk pelanggaran</li>
+        <li>Siaran frame via WebSocket port 8765</li>
+        <li>Kirim WhatsApp ke PIC (cooldown 120 detik)</li>
+        <li>Publikasi alarm MQTT terenkripsi AES-128</li>
+        <li>Lapor pelanggaran ke Next.js via service token</li>
+      </ul>
+    </article>
+    <article class="comp-card">
+      <h3><span class="dot dot-green"></span>SQLite</h3>
+      <p class="caption">Penyimpanan data permanen.</p>
+      <ul class="task-list">
+        <li>Tabel: User, Role, Permission, Session, Sector, Node, Violation, Setting, AuditLog</li>
+        <li>Diakses via Prisma dari Next.js</li>
+        <li>Mode WAL untuk akses bersamaan</li>
+        <li>Lokasi: <code>web-dashboard/data/safeguard.db</code></li>
+        <li>Python mengakses lewat API, bukan langsung</li>
+      </ul>
+    </article>
+    <article class="comp-card">
+      <h3><span class="dot dot-purple"></span>ESP32</h3>
+      <p class="caption">Mikrokontroler alarm fisik.</p>
+      <ul class="task-list">
+        <li>Berlangganan MQTT topik <code>APD_Violation</code></li>
+        <li>Dekripsi pesan AES-128</li>
+        <li>Memutar MP3 alarm melalui DAC ke speaker</li>
+        <li>LED indikator status koneksi dan alarm</li>
+      </ul>
+    </article>
+    <article class="comp-card">
+      <h3><span class="dot dot-red"></span>HiveMQ (MQTT)</h3>
+      <p class="caption">Perantara pesan Python ke ESP32.</p>
+      <ul class="task-list">
+        <li>Port 8883 dengan TLS</li>
+        <li>Topik <code>APD_Violation</code></li>
+        <li>Python publikasi, ESP32 berlangganan</li>
+        <li>Alternatif: Mosquitto lokal port 1883</li>
+      </ul>
+    </article>
+    <article class="comp-card">
+      <h3><span class="dot dot-cyan"></span>Cloudflare Tunnel</h3>
+      <p class="caption">Akses jarak jauh aman.</p>
+      <ul class="task-list">
+        <li>Daemon <code>cloudflared</code> sebagai Windows service</li>
+        <li>Meneruskan domain ke <code>localhost:3000</code></li>
+        <li>TLS otomatis, tanpa membuka port router</li>
+        <li>Loopback tetap berfungsi saat tunnel mati</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- TABEL TUGAS -->
+<!-- ============================================================ -->
+<section class="container" id="tasks-table">
+  <h2>5. Pembagian Tugas</h2>
+  <div class="table-wrapper">
+    <table class="task-table">
+      <thead>
+        <tr><th>Pekerjaan</th><th class="col-nextjs">Next.js</th><th class="col-python">Python</th><th class="col-db">SQLite</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Menyajikan halaman web</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Login dan verifikasi password</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Pemeriksaan izin (RBAC)</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Audit log</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>CRUD node, pengguna, peran, sektor</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Dashboard dan statistik</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Uji koneksi RTSP dan MQTT</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Acknowledge pelanggaran</td><td class="col-nextjs">✓</td><td></td><td></td></tr>
+        <tr><td>Tangkap frame kamera</td><td></td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Inferensi YOLO</td><td></td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Siaran frame WebSocket</td><td></td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Kirim WhatsApp</td><td></td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Alarm MQTT ke ESP32</td><td></td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Lapor pelanggaran</td><td>Penerima</td><td class="col-python">✓</td><td></td></tr>
+        <tr><td>Simpan data permanen</td><td></td><td></td><td class="col-db">✓</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- CARA MENJALANKAN -->
+<!-- ============================================================ -->
+<section class="container" id="start-guide">
+  <h2>6. Cara Menjalankan</h2>
+  <p class="warning"><strong>Urutan penting:</strong> Next.js lebih dulu, baru Python.</p>
+  <div class="start-grid">
+    <div class="start-step">
+      <div class="step-num">1</div>
+      <h3>Terminal 1 — Next.js</h3>
+      <pre><code>cd web-dashboard
+npm run start</code></pre>
+      <p>Tunggu hingga muncul "Ready". Akses di <code>http://localhost:3000</code>.</p>
+    </div>
+    <div class="start-step">
+      <div class="step-num">2</div>
+      <h3>Terminal 2 — Python</h3>
+      <pre><code>python ServiceAPDBackend.py</code></pre>
+      <p>Tunggu hingga model dimuat dan WebSocket aktif pada port 8765.</p>
+    </div>
+    <div class="start-step">
+      <div class="step-num">3</div>
+      <h3>Opsional — Cloudflare Tunnel</h3>
+      <pre><code>cloudflared tunnel run</code></pre>
+      <p>Hanya diperlukan untuk akses jarak jauh.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- FAQ -->
+<!-- ============================================================ -->
+<section class="container" id="faq">
+  <h2>7. Pertanyaan Umum</h2>
+  <details class="faq-item" open>
+    <summary>Mengapa Python memakai service token, bukan login biasa?</summary>
+    <p>Python adalah proses mesin, bukan pengguna manusia. Login sesi dirancang untuk manusia dengan cookie dan CSRF. Service token adalah metode standar autentikasi mesin-ke-mesin yang lebih sederhana dan tanpa kedaluwarsa sesi.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Jika Python berhenti, apakah Next.js tetap jalan?</summary>
+    <p>Ya. Seluruh halaman web tetap berfungsi. Hanya live monitor yang kosong karena sumber frame dari Python berhenti.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Jika Next.js berhenti, apakah deteksi tetap jalan?</summary>
+    <p>Deteksi YOLO tetap berjalan karena Python independen. Namun Python tidak dapat melaporkan pelanggaran baru ke database hingga Next.js kembali aktif.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Mengapa Python tidak mengakses SQLite langsung?</summary>
+    <p>Agar ada satu sumber kebenaran. Semua perubahan data melewati Next.js sehingga tercatat di audit log, tervalidasi, dan tidak terjadi konflik tulis bersamaan.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Apakah ESP32 perlu internet?</summary>
+    <p>Perlu jika memakai HiveMQ Cloud. Jika memakai broker Mosquitto lokal, ESP32 cukup terhubung ke WiFi yang sama dengan laptop.</p>
+  </details>
+</section>
+
+</main>
+
+<footer class="footer">
+  <p>SafeGuard APD — PBL Politeknik Negeri Malang 2026 · <a href="https://github.com/sitaurs/pbl-ppe" target="_blank" rel="noopener">Repositori GitHub</a></p>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

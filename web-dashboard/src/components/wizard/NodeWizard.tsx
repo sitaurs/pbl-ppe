@@ -4,6 +4,7 @@ import { useReducer, useCallback, useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { NodeWizardProps, NodeData } from '@/lib/node-types';
 import WizardStepper from '@/components/wizard/WizardStepper';
+import { usePermission } from '@/hooks/use-permission';
 import StepSectorInfo, {
   StepSectorInfoValues,
   validateStepSectorInfo,
@@ -269,6 +270,16 @@ export default function NodeWizard({ mode, initialData, onSave, onClose }: NodeW
   const wizardRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
 
+  // Permission gating: simpan dimatikan jika user tidak punya izin (Req 14.4)
+  const canCreate = usePermission('node:create');
+  const canUpdate = usePermission('node:update');
+  const canSave = mode === 'add' ? canCreate : canUpdate;
+  const saveDisabledReason = canSave
+    ? null
+    : mode === 'add'
+    ? 'Anda tidak memiliki izin untuk membuat node.'
+    : 'Anda tidak memiliki izin untuk mengubah node.';
+
   // Focus trap: focus the wizard when it mounts
   useEffect(() => {
     wizardRef.current?.focus();
@@ -466,6 +477,8 @@ export default function NodeWizard({ mode, initialData, onSave, onClose }: NodeW
             onEditStep={goToStep}
             onSave={handleSave}
             saving={saving}
+            canSave={canSave}
+            saveDisabledReason={saveDisabledReason}
           />
         );
       default:

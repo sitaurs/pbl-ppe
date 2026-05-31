@@ -58,7 +58,8 @@ WEBSOCKET_PORT: int = int(os.getenv("WEBSOCKET_PORT", "8765"))
 # ============================================================
 # Dashboard
 # ============================================================
-DASHBOARD_API_URL: str = os.getenv("DASHBOARD_API_URL", "http://localhost:3000")
+DASHBOARD_API_URL: str = os.getenv("DASHBOARD_API_URL", "http://127.0.0.1:3000")
+APD_SERVICE_TOKEN: str = os.getenv("APD_SERVICE_TOKEN", "")
 
 # ============================================================
 # GPU

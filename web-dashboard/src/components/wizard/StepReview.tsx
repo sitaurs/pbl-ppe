@@ -13,6 +13,8 @@ export interface StepReviewProps {
   onEditStep: (step: number) => void;
   onSave: () => void;
   saving: boolean;
+  canSave?: boolean;
+  saveDisabledReason?: string | null;
 }
 
 // --- Component ---
@@ -34,6 +36,8 @@ export default function StepReview({
   onEditStep,
   onSave,
   saving,
+  canSave = true,
+  saveDisabledReason,
 }: StepReviewProps) {
   return (
     <div className="step-review" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -88,16 +92,22 @@ export default function StepReview({
       <button
         type="button"
         onClick={onSave}
-        disabled={saving}
+        disabled={saving || !canSave}
+        title={!canSave ? saveDisabledReason ?? undefined : undefined}
         className="btn-primary min-h-[44px]"
         style={{
           marginTop: 8,
-          opacity: saving ? 0.6 : 1,
-          cursor: saving ? 'not-allowed' : 'pointer',
+          opacity: saving || !canSave ? 0.6 : 1,
+          cursor: saving || !canSave ? 'not-allowed' : 'pointer',
         }}
       >
         {saving ? 'Menyimpan...' : 'Simpan'}
       </button>
+      {!canSave && saveDisabledReason && (
+        <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--danger, #c4442e)' }}>
+          {saveDisabledReason}
+        </p>
+      )}
     </div>
   );
 }

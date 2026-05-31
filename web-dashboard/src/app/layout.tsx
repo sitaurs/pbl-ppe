@@ -1,12 +1,15 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 import '@/styles/node-tree-animations.css';
 import Link from 'next/link';
 import { LayoutDashboard, Monitor, AlertTriangle, Server, BarChart3 } from 'lucide-react';
 import LayoutShell from '@/components/LayoutShell';
+import { AuthProvider } from '@/hooks/use-current-user';
 
-const inter = Inter({ subsets: ['latin'] });
+// Font Inter di-fallback ke system font stack agar build production tidak
+// bergantung pada akses ke fonts.googleapis.com saat build time.
+// CSS globals.css sudah include 'Inter','Segoe UI', dll sebagai font-family.
+const fontClass = 'font-sans';
 
 export const metadata: Metadata = {
   title: 'SafeGuard APD — Monitoring Dashboard',
@@ -20,8 +23,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id">
-      <body className={inter.className}>
-        <div className="flex min-h-screen md:p-3" style={{ background: 'var(--background-flat)' }}>
+      <body className={fontClass}>
+        <AuthProvider>
+          <div className="flex min-h-screen md:p-3" style={{ background: 'var(--background-flat)' }}>
           {/* Desktop Sidebar + Main Content (client component) */}
           <LayoutShell>{children}</LayoutShell>
 
@@ -49,6 +53,7 @@ export default function RootLayout({
             </Link>
           </nav>
         </div>
+        </AuthProvider>
       </body>
     </html>
   );

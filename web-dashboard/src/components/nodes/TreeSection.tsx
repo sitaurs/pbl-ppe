@@ -171,17 +171,6 @@ export default function TreeSection({
           width: 1px;
           background-color: #d1d5db;
         }
-        @media (prefers-color-scheme: dark) {
-          .tree-section-label {
-            color: #e5e7eb;
-          }
-          .tree-section-header:hover {
-            background-color: rgba(255, 255, 255, 0.04);
-          }
-          .tree-section-connector::before {
-            background-color: #4b5563;
-          }
-        }
         @media (prefers-reduced-motion: reduce) {
           .tree-section-chevron {
             transition: none !important;

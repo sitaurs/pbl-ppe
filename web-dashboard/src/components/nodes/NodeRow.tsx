@@ -5,6 +5,7 @@ import { Pencil, Copy, Power, Trash2, ChevronRight } from 'lucide-react';
 import HealthScoreIndicator from './HealthScoreIndicator';
 import CompositionIcon from './CompositionIcon';
 import NodeTreeView, { deriveComposition } from './NodeTreeView';
+import { PermissionGate } from '@/components/access/PermissionGate';
 import {
   NodeData,
   NodeStatus,
@@ -181,41 +182,49 @@ export default function NodeRow({
         {/* Actions */}
         <td className="px-4 py-3" onClick={stopPropagation}>
           <div className="flex items-center justify-center gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(node); }}
-              className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-              title="Edit"
-              style={{ color: 'var(--accent)' }}
-              aria-label={`Edit node ${node.sektorName}`}
-            >
-              <Pencil size={14} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDuplicate(node); }}
-              className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-              title="Duplikat"
-              style={{ color: 'var(--text-secondary)' }}
-              aria-label={`Duplikat node ${node.sektorName}`}
-            >
-              <Copy size={14} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleEnabled(node); }}
-              className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-              title={node.enabled ? 'Nonaktifkan' : 'Aktifkan'}
-              style={{ color: node.enabled ? 'var(--orange)' : 'var(--text-muted)' }}
-              aria-label={`${node.enabled ? 'Nonaktifkan' : 'Aktifkan'} node ${node.sektorName}`}
-            >
-              <Power size={14} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}
-              className="btn-danger p-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
-              title="Hapus"
-              aria-label={`Hapus node ${node.sektorName}`}
-            >
-              <Trash2 size={14} />
-            </button>
+            <PermissionGate permission="node:update">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(node); }}
+                className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                title="Edit"
+                style={{ color: 'var(--accent)' }}
+                aria-label={`Edit node ${node.sektorName}`}
+              >
+                <Pencil size={14} />
+              </button>
+            </PermissionGate>
+            <PermissionGate permission="node:create">
+              <button
+                onClick={(e) => { e.stopPropagation(); onDuplicate(node); }}
+                className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                title="Duplikat"
+                style={{ color: 'var(--text-secondary)' }}
+                aria-label={`Duplikat node ${node.sektorName}`}
+              >
+                <Copy size={14} />
+              </button>
+            </PermissionGate>
+            <PermissionGate permission="node:toggle">
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleEnabled(node); }}
+                className="p-2 rounded-lg hover:bg-blue-50 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                title={node.enabled ? 'Nonaktifkan' : 'Aktifkan'}
+                style={{ color: node.enabled ? 'var(--orange)' : 'var(--text-muted)' }}
+                aria-label={`${node.enabled ? 'Nonaktifkan' : 'Aktifkan'} node ${node.sektorName}`}
+              >
+                <Power size={14} />
+              </button>
+            </PermissionGate>
+            <PermissionGate permission="node:delete">
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}
+                className="btn-danger p-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                title="Hapus"
+                aria-label={`Hapus node ${node.sektorName}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </PermissionGate>
           </div>
         </td>
       </tr>

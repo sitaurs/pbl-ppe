@@ -1,0 +1,52 @@
+# cloudflared/config.yml
+# Cloudflare Tunnel (named tunnel) configuration for SafeGuard APD.
+# Sesuai design.md §Cloudflare Tunnel Deployment dan Req 15.2.
+#
+# Catatan deployment:
+#  1. Replace <tunnel-uuid> dengan UUID hasil `cloudflared tunnel create safeguard-apd`.
+#  2. Replace <USER> dengan username Windows host.
+#  3. Setelah tunnel created, jalankan:
+#       cloudflared tunnel route dns safeguard-apd safeguard.<your-domain>
+#       cloudflared tunnel route dns safeguard-apd ws.safeguard.<your-domain>
+#  4. Install sebagai service Windows agar auto-start:
+#       cloudflared service install
+#       Start-Service cloudflared
+#  5. Verifikasi: kunjungi https://safeguard.<your-domain> di browser.
+#
+# Mode: named tunnel (BUKAN WARP, BUKAN Cloudflare Access). Auth tetap
+# dilakukan oleh aplikasi via session cookie + RBAC.
+#
+# Arsitektur 2 hostname:
+#  - safeguard.<domain>     → Next.js port 3000 (UI + API + auth)
+#  - ws.safeguard.<domain>  → Python YOLO port 8765 (WebSocket frame stream)
+#
+# Halaman /monitor di browser akan connect WebSocket ke ws.safeguard.<domain>.
+# Update env NEXT_PUBLIC_YOLO_WS_URL di web-dashboard/.env.local sesuai hostname.
+# WebSocket pass-through aktif by default sejak cloudflared >= 2024.
+
+tunnel: <tunnel-uuid>
+credentials-file: C:\Users\<USER>\.cloudflared\<tunnel-uuid>.json
+
+ingress:
+  # === Next.js Web (UI + API + Auth + RBAC) ===
+  - hostname: safeguard.example.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+      keepAliveConnections: 10
+      disableChunkedEncoding: false
+
+  # === Python YOLO WebSocket (live frame stream untuk halaman /monitor) ===
+  - hostname: ws.safeguard.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      # WebSocket long-lived; keep-alive panjang supaya frame tidak terputus.
+      keepAliveTimeout: 600s
+      keepAliveConnections: 5
+
+  # Catch-all
+  - service: http_status:404

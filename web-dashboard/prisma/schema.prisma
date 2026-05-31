@@ -1,0 +1,183 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  // Connection URL is configured in prisma.config.ts (Prisma 7.x requirement).
+  // Effective URL: "file:../data/safeguard.db" relative to this prisma/ folder
+  // which resolves to "data/safeguard.db" at the project root.
+}
+
+model User {
+  id                  String   @id @default(uuid())
+  username            String   @unique
+  email               String   @unique
+  fullName            String
+  passwordHash        String
+  passwordChangedAt   DateTime @default(now())
+  mustChangePassword  Boolean  @default(true)
+  status              String   @default("active") // active | disabled | locked
+  lockedUntil         DateTime?
+  totpEnabled         Boolean  @default(false)
+  totpSecretEnc       String?  // AES-256-GCM ciphertext (base64)
+  lastLoginAt         DateTime?
+  roleId              String
+  role                Role     @relation(fields: [roleId], references: [id])
+  sessions            Session[]
+  sectors             SectorAssignment[]
+  recoveryCodes       RecoveryCode[]
+  acknowledgedViolations Violation[] @relation("AckUser")
+  updatedSettings     Setting[]   @relation("SettingUpdater")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([roleId])
+  @@index([status])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isDefault   Boolean  @default(false) // true for 5 seeded roles
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Permission {
+  id          String   @id // format: resource:action  e.g. "node:create"
+  resource    String
+  action      String
+  description String?
+  roles       RolePermission[]
+
+  @@index([resource])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Session {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  csrfToken        String
+  expiresAt        DateTime
+  lastRefreshedAt  DateTime @default(now())
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt]) // cleanup job (Req 4.8)
+}
+
+model Sector {
+  id          String   @id          // matches existing sektorId like "S-01"
+  name        String
+  description String?
+  nodes       Node[]
+  violations  Violation[]
+  users       SectorAssignment[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SectorAssignment {
+  userId    String
+  sektorId  String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sector    Sector  @relation(fields: [sektorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, sektorId])
+  @@index([sektorId])
+}
+
+model Node {
+  id            Int      @id            // preserves existing numeric id (e.g. 1, 1779523136839)
+  sektorId      String
+  sektorName    String                  // flat for ServiceAPDBackend.py
+  picName       String
+  picPhone      String
+  cameraSource  String                  // flat for ServiceAPDBackend.py
+  enabled       Boolean  @default(true)
+  camera        String?                 // JSON-serialized CameraConfig | null
+  esp32         String?                 // JSON-serialized ESP32Config | null
+  detection     String?                 // JSON-serialized DetectionConfig | null
+  sector        Sector   @relation(fields: [sektorId], references: [id])
+  violations    Violation[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([sektorId])
+  @@index([enabled])
+}
+
+model Violation {
+  id              String   @id @default(uuid())
+  timestamp       DateTime
+  nodeId          Int
+  sektorId        String                  // denormalized for sector-scoped queries
+  ppeMissing      String                  // JSON-serialized string[]
+  imageRef        String
+  acknowledged    Boolean  @default(false)
+  acknowledgedById String?
+  acknowledgedAt  DateTime?
+  acknowledgedBy  User?    @relation("AckUser", fields: [acknowledgedById], references: [id])
+  node            Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  sector          Sector   @relation(fields: [sektorId], references: [id])
+
+  @@index([timestamp])
+  @@index([sektorId, timestamp])
+  @@index([nodeId, timestamp])
+}
+
+model Setting {
+  key            String   @id
+  value          String                 // JSON-serialized
+  updatedAt      DateTime @updatedAt
+  updatedById    String?
+  updatedBy      User?    @relation("SettingUpdater", fields: [updatedById], references: [id])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?                 // uuid OR sentinel seperti "system:python-backend"; TANPA FK agar nilai non-user diterima
+  action       String
+  resourceType String?
+  resourceId   String?
+  timestamp    DateTime @default(now())
+  ipAddress    String?
+  userAgent    String?
+  metadata     String?                 // JSON, max 4 KB
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([action])
+  @@index([resourceType, resourceId])
+}
+
+model RecoveryCode {
+  id        String   @id @default(uuid())
+  userId    String
+  codeHash  String                      // SHA-256 of base32 code
+  used      Boolean  @default(false)
+  usedAt    DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

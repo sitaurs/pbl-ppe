@@ -16,8 +16,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  */
 
 export interface LivePreviewPanelProps {
-  /** Node ID to stream frames from */
+  /** Node ID di DB (mis. 1) — untuk label */
   nodeId: number;
+  /** cameraSource node (mis. "0" atau "rtsp://...") — untuk match frame dari Python */
+  cameraSource?: string;
   /** Callback when panel is closed */
   onClose: () => void;
 }
@@ -26,28 +28,24 @@ type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 /**
  * Derives the WebSocket URL for frame streaming.
- * Uses NEXT_PUBLIC_WS_URL env variable if set, otherwise derives from window.location.
+ * Python backend (ServiceAPDBackend.py) menyajikan SATU WebSocket di root
+ * (ws://host:8765) dan broadcast SEMUA frame ke setiap client. Tidak ada
+ * path per-node, jadi kita connect ke root lalu filter by camera_source.
  */
-function getWebSocketUrl(nodeId: number): string {
-  // Check environment variable first
+function getWebSocketUrl(): string {
   if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WS_URL) {
-    const base = process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '');
-    return `${base}/stream/${nodeId}`;
+    return process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '');
   }
-
-  // Derive from window.location
   if (typeof window !== 'undefined') {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    // Default WS port — backend typically runs on 8765
     const port = process.env.NEXT_PUBLIC_WS_PORT || '8765';
-    return `${protocol}//${host}:${port}/stream/${nodeId}`;
+    return `${protocol}//${host}:${port}`;
   }
-
-  return `ws://localhost:8765/stream/${nodeId}`;
+  return 'ws://localhost:8765';
 }
 
-export default function LivePreviewPanel({ nodeId, onClose }: LivePreviewPanelProps) {
+export default function LivePreviewPanel({ nodeId, cameraSource, onClose }: LivePreviewPanelProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [currentFrame, setCurrentFrame] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -57,7 +55,7 @@ export default function LivePreviewPanel({ nodeId, onClose }: LivePreviewPanelPr
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
 
-    const url = getWebSocketUrl(nodeId);
+    const url = getWebSocketUrl();
     setConnectionState('connecting');
 
     try {
@@ -72,23 +70,26 @@ export default function LivePreviewPanel({ nodeId, onClose }: LivePreviewPanelPr
 
       ws.onmessage = (event) => {
         if (!mountedRef.current) return;
-
-        // Expect base64-encoded JPEG frame data
-        const data = event.data;
-        if (typeof data === 'string') {
-          setCurrentFrame(data);
-        } else if (data instanceof Blob) {
-          // Handle Blob by converting to base64
-          const reader = new FileReader();
-          reader.onload = () => {
-            if (mountedRef.current && reader.result) {
-              const base64 = (reader.result as string).split(',')[1];
-              if (base64) {
-                setCurrentFrame(base64);
-              }
-            }
+        const raw = event.data;
+        if (typeof raw !== 'string') return;
+        // Python kirim JSON: { event:'video_frame', node_id, camera_source, frame:base64, ... }
+        try {
+          const msg = JSON.parse(raw) as {
+            event?: string;
+            node_id?: string | number;
+            camera_source?: string | number;
+            frame?: string;
           };
-          reader.readAsDataURL(data);
+          if (msg.event !== 'video_frame' || !msg.frame) return;
+          // Filter: hanya tampilkan frame milik node ini (match by camera_source).
+          // Jika cameraSource tidak diberikan, terima semua (fallback).
+          if (cameraSource != null && cameraSource !== '') {
+            const src = String(msg.camera_source ?? msg.node_id ?? '');
+            if (src !== String(cameraSource)) return;
+          }
+          setCurrentFrame(msg.frame);
+        } catch {
+          // Bukan JSON — abaikan.
         }
       };
 
@@ -109,7 +110,7 @@ export default function LivePreviewPanel({ nodeId, onClose }: LivePreviewPanelPr
         setConnectionState('error');
       }
     }
-  }, [nodeId]);
+  }, [cameraSource]);
 
   // Connect on mount
   useEffect(() => {

@@ -65,17 +65,6 @@ export default function TreeItem({
           color: #111827;
           word-break: break-all;
         }
-        @media (prefers-color-scheme: dark) {
-          .tree-item-label {
-            color: #9ca3af;
-          }
-          .tree-item-value {
-            color: #f3f4f6;
-          }
-          .tree-item-connector {
-            color: #9ca3af;
-          }
-        }
       `}</style>
       <div
         className={`tree-item tree-item-stagger ${className}`}

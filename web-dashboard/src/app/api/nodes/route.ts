@@ -1,50 +1,127 @@
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-import { migrateNode } from '@/lib/node-migration';
-import { syncFlatFields } from '@/lib/sync-flat-fields';
+/**
+ * GET  /api/nodes — list nodes (sector-scoped jika role Supervisor/PIC)
+ * POST /api/nodes — create node (permission node:create)
+ *
+ * Migrasi dari file-based store (`data/db.json`) ke SQLite via Prisma.
+ * Mempertahankan kontrak lama: response tetap berbentuk flat array NodeData
+ * dengan field flat (id, sektorId, sektorName, ...) dan nested (camera,
+ * esp32, detection) — sehingga ServiceAPDBackend.py + spec node-detail-tree-view
+ * tetap bekerja.
+ */
+import { NextResponse, type NextRequest } from "next/server";
+import { applySectorScope } from "@/lib/rbac/sector-scope";
+import { getRequestContext } from "@/lib/rbac/context";
+import { appendAuditLog } from "@/lib/audit/audit-log";
+import { migrateNode } from "@/lib/node-migration";
+import { prisma } from "@/lib/prisma";
 
-const dbPath = path.join(process.cwd(), 'data', 'db.json');
+interface DbNodeRow {
+  id: number;
+  sektorId: string;
+  sektorName: string;
+  picName: string;
+  picPhone: string;
+  cameraSource: string;
+  enabled: boolean;
+  camera: string | null;
+  esp32: string | null;
+  detection: string | null;
+}
 
-function getDb() {
-  if (!fs.existsSync(dbPath)) {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    fs.writeFileSync(dbPath, JSON.stringify({ nodes: [] }, null, 2));
-  }
-  const file = fs.readFileSync(dbPath, 'utf8');
+function parseJsonNullable<T>(s: string | null): T | null {
+  if (!s) return null;
   try {
-    return JSON.parse(file);
+    return JSON.parse(s) as T;
   } catch {
-    return { nodes: [] };
+    return null;
   }
 }
 
-export async function GET() {
-  const db = getDb();
-  // Apply migration on read for legacy nodes
-  const migratedNodes = db.nodes.map((node: any) => migrateNode(node));
-  return NextResponse.json(migratedNodes);
+function rowToNode(row: DbNodeRow): Record<string, unknown> {
+  return migrateNode({
+    id: row.id,
+    sektorId: row.sektorId,
+    sektorName: row.sektorName,
+    picName: row.picName,
+    picPhone: row.picPhone,
+    cameraSource: row.cameraSource,
+    enabled: row.enabled,
+    camera: parseJsonNullable(row.camera),
+    esp32: parseJsonNullable(row.esp32),
+    detection: parseJsonNullable(row.detection),
+  }) as unknown as Record<string, unknown>;
 }
 
-export async function POST(req: Request) {
-  const db = getDb();
-  const body = await req.json();
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const ctx = getRequestContext(req);
+  const where = applySectorScope({}, ctx);
+  const rows = await prisma.node.findMany({
+    where,
+    orderBy: { id: "asc" },
+  });
+  return NextResponse.json(rows.map((r) => rowToNode(r as DbNodeRow)));
+}
 
-  // Build node with both flat + nested fields
-  const newNode = { id: Date.now(), ...body, enabled: body.enabled ?? true };
+interface CreateNodeBody {
+  sektorId: string;
+  sektorName?: string;
+  picName?: string;
+  picPhone?: string;
+  cameraSource?: string;
+  enabled?: boolean;
+  camera?: unknown;
+  esp32?: unknown;
+  detection?: unknown;
+}
 
-  // Sync flat fields from nested objects for backward compatibility
-  const syncedNode = syncFlatFields(newNode);
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const ctx = getRequestContext(req);
+  let body: CreateNodeBody;
+  try {
+    body = (await req.json()) as CreateNodeBody;
+  } catch {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  if (!body.sektorId || typeof body.sektorId !== "string") {
+    return NextResponse.json({ error: "sektorId_required" }, { status: 400 });
+  }
 
-  // Ensure flat fields are always present
-  syncedNode.sektorId = syncedNode.sektorId || '';
-  syncedNode.sektorName = syncedNode.sektorName || '';
-  syncedNode.picName = syncedNode.picName || '';
-  syncedNode.picPhone = syncedNode.picPhone || '';
-  syncedNode.cameraSource = syncedNode.cameraSource || '0';
-  syncedNode.enabled = syncedNode.enabled ?? true;
+  // Auto-create Sector jika belum ada (compat path; admin biasanya buat dulu)
+  await prisma.sector.upsert({
+    where: { id: body.sektorId },
+    create: { id: body.sektorId, name: body.sektorName ?? body.sektorId },
+    update: {},
+  });
 
-  db.nodes.push(syncedNode);
-  fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-  return NextResponse.json(syncedNode);
+  const created = await prisma.node.create({
+    data: {
+      // Generate id since schema uses AUTOINCREMENT (Int @id) — Prisma 7 forbids
+      // omitting required PK fields. Node IDs follow legacy pattern: timestamp-ish
+      // millis as fallback.
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      sektorId: body.sektorId,
+      sektorName: body.sektorName ?? "",
+      picName: body.picName ?? "",
+      picPhone: body.picPhone ?? "",
+      cameraSource: body.cameraSource ?? "0",
+      enabled: body.enabled ?? true,
+      camera: body.camera ? JSON.stringify(body.camera) : null,
+      esp32: body.esp32 ? JSON.stringify(body.esp32) : null,
+      detection: body.detection ? JSON.stringify(body.detection) : null,
+    },
+  });
+
+  if (ctx.user) {
+    await appendAuditLog({
+      userId: ctx.user.id,
+      action: "node:create",
+      resourceType: "node",
+      resourceId: String(created.id),
+      ipAddress: ctx.clientIp,
+      userAgent: req.headers.get("user-agent"),
+      metadata: { sektorId: created.sektorId },
+    });
+  }
+
+  return NextResponse.json(rowToNode(created as DbNodeRow), { status: 201 });
 }

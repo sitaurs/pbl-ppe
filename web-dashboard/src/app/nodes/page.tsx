@@ -426,6 +426,7 @@ export default function NodesPage() {
       {livePreviewNodeId !== null && (
         <LivePreviewPanel
           nodeId={livePreviewNodeId}
+          cameraSource={nodes.find((n) => n.id === livePreviewNodeId)?.cameraSource}
           onClose={handleCloseLivePreview}
         />
       )}

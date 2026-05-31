@@ -1,91 +1,126 @@
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+/**
+ * GET /api/settings  (setting:read; service-token allowed)
+ * PUT /api/settings  (setting:update:branding) — back-compat path
+ *
+ * Mengembalikan map settings dari tabel `Setting` (key, JSON-serialized value).
+ * Untuk back-compat, endpoint juga menerima `PUT` body berupa partial settings
+ * yang di-deep-merge per-key.
+ */
+import { NextResponse, type NextRequest } from "next/server";
+import { appendAuditLog } from "@/lib/audit/audit-log";
+import { getRequestContext } from "@/lib/rbac/context";
+import { prisma } from "@/lib/prisma";
 
-const settingsPath = path.join(process.cwd(), 'data', 'settings.json');
-
-const defaultSettings = {
+const DEFAULT_SETTINGS: Record<string, unknown> = {
   branding: {
-    appName: 'SafeGuard APD',
-    companyName: '',
-    logoUrl: '',
-    primaryColor: '#e8720b',
+    appName: "SafeGuard APD",
+    companyName: "",
+    logoUrl: "",
+    primaryColor: "#e8720b",
   },
   whatsapp: {
     enabled: true,
-    serverUrl: 'http://157.245.206.36:3000',
-    username: 'admin',
-    password: 'pbl_apd_2026!secure',
-    deviceId: 'pbl-alarm',
+    serverUrl: "http://157.245.206.36:3000",
+    username: "admin",
+    password: "",
+    deviceId: "pbl-alarm",
     cooldownSeconds: 120,
   },
   mqtt: {
     enabled: true,
-    brokerUrl: 'f559f825bedc477fa8b74e7375f66fd2.s1.eu.hivemq.cloud',
+    brokerUrl: "",
     port: 8883,
-    username: 'aldis',
-    password: 'Polinema2026',
-    topicViolation: 'APD_Violation',
+    username: "",
+    password: "",
+    topicViolation: "APD_Violation",
   },
   system: {
     websocketPort: 8765,
     confidenceThreshold: 0.65,
-    personConfidence: 0.60,
+    personConfidence: 0.6,
   },
 };
 
-function getSettings() {
-  if (!fs.existsSync(settingsPath)) {
-    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 2));
-    return defaultSettings;
+async function loadSettings(): Promise<Record<string, unknown>> {
+  const rows = await prisma.setting.findMany();
+  const dbMap: Record<string, unknown> = {};
+  for (const r of rows) {
+    try {
+      dbMap[r.key] = JSON.parse(r.value);
+    } catch {
+      dbMap[r.key] = r.value;
+    }
   }
-  try {
-    const file = fs.readFileSync(settingsPath, 'utf8');
-    return JSON.parse(file);
-  } catch {
-    return defaultSettings;
-  }
+  // Merge defaults dengan DB values (DB wins per key)
+  const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+  for (const [k, v] of Object.entries(dbMap)) merged[k] = v;
+  return merged;
 }
 
-function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+export async function GET(): Promise<NextResponse> {
+  const settings = await loadSettings();
+  return NextResponse.json(settings);
+}
+
+function deepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
-    if (
-      source[key] &&
-      typeof source[key] === 'object' &&
-      !Array.isArray(source[key]) &&
-      target[key] &&
-      typeof target[key] === 'object' &&
-      !Array.isArray(target[key])
-    ) {
-      result[key] = deepMerge(
-        target[key] as Record<string, unknown>,
-        source[key] as Record<string, unknown>
-      );
+    const sv = source[key];
+    const tv = target[key];
+    if (sv && typeof sv === "object" && !Array.isArray(sv) && tv && typeof tv === "object" && !Array.isArray(tv)) {
+      result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>);
     } else {
-      result[key] = source[key];
+      result[key] = sv;
     }
   }
   return result;
 }
 
-export async function GET() {
-  const settings = getSettings();
-  return NextResponse.json(settings);
-}
-
-export async function PUT(req: Request) {
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  const ctx = getRequestContext(req);
+  let body: unknown;
   try {
-    const body = await req.json();
-    const current = getSettings();
-    const merged = deepMerge(current, body);
-    fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
-    return NextResponse.json({ ok: true, data: merged });
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, message: 'Gagal menyimpan pengaturan' },
-      { status: 500 }
-    );
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const current = await loadSettings();
+  const merged = deepMerge(current, body as Record<string, unknown>);
+
+  // Persist setiap top-level key sebagai row
+  await prisma.$transaction(
+    Object.entries(merged).map(([key, value]) =>
+      prisma.setting.upsert({
+        where: { key },
+        create: {
+          key,
+          value: JSON.stringify(value),
+          updatedById: ctx.user?.id ?? null,
+        },
+        update: {
+          value: JSON.stringify(value),
+          updatedById: ctx.user?.id ?? null,
+        },
+      }),
+    ),
+  );
+
+  if (ctx.user) {
+    await appendAuditLog({
+      userId: ctx.user.id,
+      action: "setting:update:branding",
+      ipAddress: ctx.clientIp,
+      userAgent: req.headers.get("user-agent"),
+      metadata: { keys: Object.keys(body) },
+    });
+  }
+
+  return NextResponse.json({ ok: true, data: merged });
 }

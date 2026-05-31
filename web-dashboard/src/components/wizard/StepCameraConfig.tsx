@@ -52,12 +52,18 @@ export function validateStepCameraConfig(values: StepCameraConfigValues): StepCa
 
   const errors: StepCameraConfigErrors = {};
 
-  // RTSP URL validation
-  if (!values.rtspUrl.trim()) {
-    errors.rtspUrl = 'URL RTSP wajib diisi';
-  } else if (!values.rtspUrl.trim().startsWith('rtsp://')) {
-    errors.rtspUrl = 'URL harus diawali dengan "rtsp://"';
-  } else if (values.rtspUrl.trim().length > 512) {
+  // Camera source validation: terima rtsp://, http(s)://, atau index webcam (angka 0-9)
+  const camSrc = values.rtspUrl.trim();
+  if (!camSrc) {
+    errors.rtspUrl = 'Sumber kamera wajib diisi';
+  } else if (
+    !camSrc.startsWith('rtsp://') &&
+    !camSrc.startsWith('http://') &&
+    !camSrc.startsWith('https://') &&
+    !/^\d{1,3}$/.test(camSrc)
+  ) {
+    errors.rtspUrl = 'Isi dengan "rtsp://...", "http://...", atau index webcam (mis. 0)';
+  } else if (camSrc.length > 512) {
     errors.rtspUrl = 'URL maksimal 512 karakter';
   }
 
@@ -255,7 +261,7 @@ export default function StepCameraConfig({ values, onChange, onTestConnection }:
               className="block text-sm font-medium"
               style={{ color: 'var(--text-secondary)' }}
             >
-              URL RTSP <span style={{ color: 'var(--danger)' }}>*</span>
+              Sumber Kamera <span style={{ color: 'var(--danger)' }}>*</span>
             </label>
             <input
               id="wizard-rtsp-url"
@@ -263,7 +269,7 @@ export default function StepCameraConfig({ values, onChange, onTestConnection }:
               value={values.rtspUrl}
               onChange={handleRtspUrlChange}
               onBlur={() => handleBlur('rtspUrl')}
-              placeholder="rtsp://192.168.1.10/live/ch00_1"
+              placeholder="rtsp://192.168.1.10/live/ch00_1  atau  0 (webcam)"
               maxLength={512}
               className="w-full"
               style={{

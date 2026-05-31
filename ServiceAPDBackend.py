@@ -35,11 +35,19 @@ import config
 # =========================
 # Konfigurasi Logging
 # =========================
+# Paksa stdout/stderr ke UTF-8 agar emoji (⚠ 🚨 dll) tidak error di
+# terminal Windows yang default-nya cp1252.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(threadName)s - %(message)s",
     handlers=[
-        logging.FileHandler("apd_detection.log"),
+        logging.FileHandler("apd_detection.log", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
@@ -49,21 +57,64 @@ logger = logging.getLogger(__name__)
 # Konfigurasi dari config.py (dibaca dari .env)
 # =========================
 DASHBOARD_API_URL = config.DASHBOARD_API_URL
+APD_SERVICE_TOKEN = config.APD_SERVICE_TOKEN
 WA_API_URL = config.WA_API_URL
 WA_API_USER = config.WA_API_USER
 WA_API_PASS = config.WA_API_PASS
 WA_DEVICE_ID = config.WA_DEVICE_ID
 
+# Header default untuk request ke Next.js Dashboard.
+# Semua endpoint /api/* di Next.js kini diproteksi middleware auth/RBAC.
+# Python backend pakai Service Token (bypass session + CSRF) lewat loopback 127.0.0.1.
+DASHBOARD_HEADERS = {"Authorization": f"Bearer {APD_SERVICE_TOKEN}"} if APD_SERVICE_TOKEN else {}
+
 def get_registered_nodes():
-    """Membaca semua data Node/Kamera dari db.json Web Dashboard."""
+    """Ambil daftar node aktif dari Dashboard API (sumber tunggal kebenaran).
+
+    Setelah migrasi JSON → SQLite (spec auth-rbac-system Req 2), `data/db.json`
+    hanya berfungsi sebagai backup; data live ada di SQLite dan diakses lewat
+    HTTP API. Python perlu menyertakan header `Authorization: Bearer <token>`
+    karena middleware Next.js menolak request anonim.
+    """
+    if not APD_SERVICE_TOKEN:
+        logger.error("APD_SERVICE_TOKEN tidak terkonfigurasi di .env. Tidak dapat memuat daftar node.")
+        return []
+    try:
+        url = f"{DASHBOARD_API_URL}/api/nodes"
+        resp = requests.get(url, headers=DASHBOARD_HEADERS, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Endpoint mengembalikan langsung array node (lihat src/app/api/nodes/route.ts).
+            # Filter node yang enabled saja (default True bila field tidak ada).
+            nodes = data if isinstance(data, list) else data.get("nodes", [])
+            return [n for n in nodes if n.get("enabled", True)]
+        if resp.status_code == 401:
+            logger.error(
+                "GET /api/nodes ditolak 401. Cek APD_SERVICE_TOKEN apakah sama "
+                "dengan web-dashboard/.env.local"
+            )
+        else:
+            logger.error(f"GET /api/nodes mengembalikan status {resp.status_code}: {resp.text[:200]}")
+    except requests.exceptions.ConnectionError:
+        logger.error(
+            f"Tidak dapat terhubung ke Dashboard di {DASHBOARD_API_URL}. "
+            "Pastikan Next.js sudah jalan (npm run start) sebelum start Python."
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch nodes from Dashboard API: {e}")
+
+    # Fallback: baca db.json langsung kalau API tidak tersedia.
+    # Berguna untuk troubleshooting saat Next.js belum siap.
     db_path = os.path.join(BASE_DIR, "web-dashboard", "data", "db.json")
     try:
         if os.path.exists(db_path):
+            logger.warning("Fallback: membaca db.json langsung (mode degraded).")
             with open(db_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("nodes", [])
+                nodes = data.get("nodes", [])
+                return [n for n in nodes if n.get("enabled", True)]
     except Exception as e:
-        logger.error(f"Failed to read db.json for Nodes: {e}")
+        logger.error(f"Fallback db.json juga gagal: {e}")
     return []
 
 def send_whatsapp_alert(phone: str, message: str, image_frame=None, camera_source="default"):
@@ -113,19 +164,48 @@ def send_whatsapp_alert(phone: str, message: str, image_frame=None, camera_sourc
         logger.error(f"Exception sending WA Notification: {e}")
         return False, "failed"
 
-def log_violation_to_dashboard(sektor_id, sektor_name, pic_name, pic_phone, violations, camera_source, wa_status):
-    """Mencatat pelanggaran ke halaman Log Pelanggaran di Dashboard."""
+def log_violation_to_dashboard(node_id, sektor_id, sektor_name, pic_name, pic_phone, violations, camera_source, wa_status):
+    """Mencatat pelanggaran ke Dashboard via POST /api/violations.
+
+    Endpoint ini memerlukan header `Authorization: Bearer <APD_SERVICE_TOKEN>`
+    karena middleware Next.js menolak request anonim. Service Token
+    sudah di-whitelist untuk endpoint ini di permission-map.ts.
+
+    node_id WAJIB id asli node di DB (Node.id, contoh: 1), BUKAN camera_source
+    ("0") — karena Next.js mencari node by id.
+    """
+    if not APD_SERVICE_TOKEN:
+        logger.error("APD_SERVICE_TOKEN kosong. Skip logging violation.")
+        return
+    if node_id is None:
+        logger.error("node_id None. Skip logging violation (node tanpa id).")
+        return
     try:
+        # Mapping ke kontrak Next.js POST /api/violations:
+        # { timestamp?, nodeId (string|number), sektorId?, ppeMissing[], imageRef? }
         payload = {
+            "nodeId": node_id,
             "sektorId": sektor_id,
-            "sektorName": sektor_name,
-            "picName": pic_name,
-            "picPhone": pic_phone,
-            "violations": violations,
-            "cameraSource": camera_source,
-            "waStatus": wa_status
+            "ppeMissing": violations,
+            "imageRef": "",
         }
-        requests.post(f"{DASHBOARD_API_URL}/api/violations", json=payload, timeout=5)
+        headers = dict(DASHBOARD_HEADERS)
+        headers["Content-Type"] = "application/json"
+        resp = requests.post(
+            f"{DASHBOARD_API_URL}/api/violations",
+            json=payload,
+            headers=headers,
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            logger.error(
+                f"POST /api/violations gagal status={resp.status_code}: {resp.text[:200]}"
+            )
+        else:
+            logger.info(
+                f"Violation logged: node={node_id} sektor={sektor_name} pic={pic_name} "
+                f"missing={violations} wa={wa_status}"
+            )
     except Exception as e:
         logger.error(f"Failed to log violation to dashboard API: {e}")
 
@@ -337,6 +417,7 @@ class APDDetectionService:
     def process_camera_node(self, node):
         """Thread Worker per Kamera/Node."""
         camera_source = str(node.get("cameraSource", "0"))
+        node_id = node.get("id")  # id asli node di DB (dipakai untuk POST violation)
         sektor_name = node.get("sektorName", f"Kamera {camera_source}")
         logger.info(f"[{sektor_name}] Thread started. Connecting to {camera_source}")
         
@@ -421,8 +502,8 @@ class APDDetectionService:
                                 logger.warning(f"[{sektor_name}] Tidak ada nomor WA terdaftar.")
                                 wa_status = "failed"
                                 
-                            # Simpan Log ke Dashboard
-                            log_violation_to_dashboard(sektor_id, sektor_name, pic_name, pic_phone, violation_names, camera_source, wa_status)
+                            # Simpan Log ke Dashboard (pakai node_id asli, bukan camera_source)
+                            log_violation_to_dashboard(node_id, sektor_id, sektor_name, pic_name, pic_phone, violation_names, camera_source, wa_status)
 
                         # Jalankan kirim WA di background
                         threading.Thread(target=wa_task, daemon=True).start()

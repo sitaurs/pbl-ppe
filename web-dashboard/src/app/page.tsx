@@ -93,8 +93,16 @@ export default function DashboardPage() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data.type === 'video_frame' && data.node_id && data.frame) {
-              latestFrames.current[data.node_id] = data.frame;
+            // Python kirim { event:'video_frame', node_id, camera_source, sector_name, frame }
+            if (data.event === 'video_frame' && data.frame) {
+              // Key by camera_source DAN sector_name agar lookup fleksibel.
+              const camSrc = String(data.camera_source ?? data.node_id ?? '');
+              if (camSrc) latestFrames.current[camSrc] = data.frame;
+              if (data.sector_name) latestFrames.current[data.sector_name] = data.frame;
+              // Tampilkan frame pertama segera (jangan tunggu 30 detik).
+              setThumbnails((prev) =>
+                Object.keys(prev).length === 0 ? { ...latestFrames.current } : prev,
+              );
             }
           } catch {}
         };
@@ -229,7 +237,11 @@ export default function DashboardPage() {
         <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollSnapType: 'x mandatory' }}>
           {sortedNodes.slice(0, 5).map((node) => {
             const hasViolation = (sectorViolationCounts[node.sektorId] || 0) > 0;
-            const thumb = thumbnails[String(node.id)] || thumbnails[node.sektorId];
+            const thumb =
+              thumbnails[String(node.cameraSource)] ||
+              thumbnails[node.sektorName] ||
+              thumbnails[String(node.id)] ||
+              thumbnails[node.sektorId];
             return (
               <div
                 key={node.id}
