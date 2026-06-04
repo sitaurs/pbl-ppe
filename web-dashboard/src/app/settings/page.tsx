@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Palette, Bell, Cpu, Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
+import { useApiFetch } from '@/hooks/use-csrf-token';
 
 type Tab = 'branding' | 'notifikasi' | 'sistem';
 
@@ -51,6 +52,7 @@ export default function SettingsPage() {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const apiFetch = useApiFetch();
 
   const [branding, setBranding] = useState<BrandingSettings>({
     appName: 'SafeGuard APD',
@@ -109,7 +111,7 @@ export default function SettingsPage() {
     setSaving(true);
     setFeedback(null);
     try {
-      const res = await fetch('/api/settings', {
+      const res = await apiFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [section]: data }),
@@ -131,7 +133,7 @@ export default function SettingsPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/settings/test-wa', {
+      const res = await apiFetch('/api/settings/test-wa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

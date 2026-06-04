@@ -6,6 +6,7 @@ import PageTransition from '@/components/PageTransition';
 import NodeTable from '@/components/nodes/NodeTable';
 import NodeWizard from '@/components/wizard/NodeWizard';
 import LivePreviewPanel from '@/components/nodes/LivePreviewPanel';
+import { useApiFetch } from '@/hooks/use-csrf-token';
 import type { NodeData } from '@/lib/node-types';
 
 type SortKey = 'sektorId' | 'sektorName' | 'cameraSource' | 'picName' | 'picPhone' | 'enabled';
@@ -34,6 +35,7 @@ export default function NodesPage() {
   // --- Data State ---
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [loading, setLoading] = useState(true);
+  const apiFetch = useApiFetch();
 
   // --- Search & Sort ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -153,7 +155,7 @@ export default function NodesPage() {
   const handleWizardSave = useCallback(async (data: Omit<NodeData, 'id'>) => {
     if (wizardMode === 'edit' && editingNodeId !== null) {
       // PUT existing node
-      const res = await fetch(`/api/nodes/${editingNodeId}`, {
+      const res = await apiFetch(`/api/nodes/${editingNodeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -163,7 +165,7 @@ export default function NodesPage() {
       }
     } else {
       // POST new node
-      const res = await fetch('/api/nodes', {
+      const res = await apiFetch('/api/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -176,7 +178,7 @@ export default function NodesPage() {
     // Close wizard and refresh list
     handleCloseWizard();
     await fetchNodes();
-  }, [wizardMode, editingNodeId, handleCloseWizard]);
+  }, [wizardMode, editingNodeId, handleCloseWizard, apiFetch]);
 
   // --- Node Actions ---
 
@@ -184,7 +186,7 @@ export default function NodesPage() {
   const handleDelete = useCallback(async (nodeId: number) => {
     if (!confirm('Hapus node ini?')) return;
     try {
-      await fetch(`/api/nodes/${nodeId}`, { method: 'DELETE' });
+      await apiFetch(`/api/nodes/${nodeId}`, { method: 'DELETE' });
       setSelectedIds(prev => {
         const next = new Set(prev);
         next.delete(nodeId);
@@ -210,7 +212,7 @@ export default function NodesPage() {
         detection: node.detection,
         enabled: node.enabled,
       };
-      const res = await fetch('/api/nodes', {
+      const res = await apiFetch('/api/nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(duplicateData),
@@ -219,12 +221,12 @@ export default function NodesPage() {
     } catch {
       // Silent fail
     }
-  }, []);
+  }, [apiFetch]);
 
   /** Toggle node enabled/disabled */
   const handleToggleEnabled = useCallback(async (node: NodeData) => {
     try {
-      await fetch(`/api/nodes/${node.id}`, {
+      await apiFetch(`/api/nodes/${node.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !node.enabled }),
@@ -233,7 +235,7 @@ export default function NodesPage() {
     } catch {
       // Silent fail
     }
-  }, []);
+  }, [apiFetch]);
 
   // --- Live Preview ---
   const handleViewLive = useCallback((nodeId: number) => {
@@ -248,7 +250,7 @@ export default function NodesPage() {
   const handleBulk = async (action: 'delete' | 'enable' | 'disable') => {
     if (action === 'delete' && !confirm(`Hapus ${selectedIds.size} node?`)) return;
     try {
-      await fetch('/api/nodes/bulk', {
+      await apiFetch('/api/nodes/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ids: Array.from(selectedIds) }),

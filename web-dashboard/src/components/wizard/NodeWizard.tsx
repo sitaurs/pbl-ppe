@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { NodeWizardProps, NodeData } from '@/lib/node-types';
 import WizardStepper from '@/components/wizard/WizardStepper';
 import { usePermission } from '@/hooks/use-permission';
+import { useApiFetch } from '@/hooks/use-csrf-token';
 import StepSectorInfo, {
   StepSectorInfoValues,
   validateStepSectorInfo,
@@ -269,6 +270,7 @@ export default function NodeWizard({ mode, initialData, onSave, onClose }: NodeW
   const [saving, setSaving] = useState(false);
   const wizardRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
+  const apiFetch = useApiFetch();
 
   // Permission gating: simpan dimatikan jika user tidak punya izin (Req 14.4)
   const canCreate = usePermission('node:create');
@@ -386,22 +388,22 @@ export default function NodeWizard({ mode, initialData, onSave, onClose }: NodeW
     } finally {
       setSaving(false);
     }
-  }, [state, initialData, onSave]);
+  }, [apiFetch, state, initialData, onSave]);
 
   // --- Connection Test Handlers ---
 
   const handleTestCameraConnection = useCallback(async (url: string) => {
-    const res = await fetch('/api/nodes/test-connection', {
+    const res = await apiFetch('/api/nodes/test-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'camera', url }),
     });
     return res.json();
-  }, []);
+  }, [apiFetch]);
 
   const handleTestMqtt = useCallback(async (broker: string, topic: string) => {
     try {
-      const res = await fetch('/api/nodes/test-connection', {
+      const res = await apiFetch('/api/nodes/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'mqtt', broker, port: 8883, username: '', password: '' }),
