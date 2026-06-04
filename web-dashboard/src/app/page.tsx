@@ -83,7 +83,8 @@ export default function DashboardPage() {
 
     const connect = () => {
       try {
-        ws = new WebSocket('ws://localhost:8765');
+        const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+        ws = new WebSocket(`ws://${wsHost}:8765`);
         ws.onopen = () => setWsConnected(true);
         ws.onclose = () => {
           setWsConnected(false);

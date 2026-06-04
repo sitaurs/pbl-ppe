@@ -429,6 +429,9 @@ class APDDetectionService:
         last_notification_time = 0.0
         last_wa_notification_time = 0.0
         last_frame_send_time = 0.0
+        last_annotated = None
+        last_safe = []
+        last_violations = []
         frame_count = 0
         # Skip frames untuk hemat CPU — proses deteksi tiap N frame saja
         DETECT_EVERY_N = 3 if not torch.cuda.is_available() else 1
@@ -456,13 +459,13 @@ class APDDetectionService:
                 # Skip frame — hanya deteksi setiap N frame, sisanya kirim frame terakhir
                 if frame_count % DETECT_EVERY_N == 0:
                     safe, violations, annotated_frame = self.detect_ppe(frame)
-                    self._last_annotated = annotated_frame
-                    self._last_safe = safe
-                    self._last_violations = violations
+                    last_annotated = annotated_frame
+                    last_safe = safe
+                    last_violations = violations
                 else:
-                    annotated_frame = getattr(self, '_last_annotated', frame)
-                    safe = getattr(self, '_last_safe', [])
-                    violations = getattr(self, '_last_violations', [])
+                    annotated_frame = last_annotated if last_annotated is not None else frame
+                    safe = last_safe
+                    violations = last_violations
 
                 current_time = time.time()
                 has_violation = len(violations) > 0
@@ -524,7 +527,7 @@ class APDDetectionService:
                         frame_b64 = base64.b64encode(buffer).decode("utf-8")
                         message = {
                             "event": "video_frame",
-                            "node_id": camera_source,
+                            "node_id": str(node_id) if node_id is not None else camera_source,
                             "camera_source": camera_source,
                             "sector_name": sektor_name,
                             "frame": frame_b64,

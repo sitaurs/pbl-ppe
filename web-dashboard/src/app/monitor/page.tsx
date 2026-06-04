@@ -30,7 +30,8 @@ export default function MonitorPage() {
 
   const connectWebSocket = () => {
     try {
-      const ws = new WebSocket('ws://localhost:8765');
+      const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+      const ws = new WebSocket(`ws://${wsHost}:8765`);
       wsRef.current = ws;
       ws.onopen = () => setWsConnected(true);
       ws.onclose = () => { setWsConnected(false); setTimeout(connectWebSocket, 3000); };
