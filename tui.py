@@ -5,15 +5,18 @@ Pure Rich + msvcrt terminal UI.  No Textual.
 Terminus-dark palette, htop-style, ASCII-only indicators.
 
 Keys : 1-6 tabs | s start-all | x stop-all | r restart-all
-       h health-check | b browser | q quit
+       h health-check | b browser | w wizard | q quit
        (in SETUP tab: a-g to run setup steps)
 """
 
 from __future__ import annotations
 
+import base64
+import getpass
 import msvcrt
 import os
 import platform
+import secrets
 import shutil
 import socket
 import subprocess
@@ -30,6 +33,7 @@ from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
@@ -268,10 +272,10 @@ def render_nav() -> Text:
     return t
 
 def render_footer() -> Text:
-    pairs = [("1-6","tabs"),("s","start-all"),("x","stop-all"),
-             ("r","restart"),("h","health"),("b","browser"),("q","quit")]
+    pairs = [("1-6","tabs"),("s","start"),("x","stop"),
+             ("r","restart"),("h","health"),("b","browser"),("w","wizard"),("q","quit")]
     if S.tab == "setup":
-        pairs.append(("a-g","run step"))
+        pairs.insert(-1, ("a-g","run step"))
     t = Text("  ")
     for k, d in pairs:
         t.append(f" {k} ", style="bold #000000 on #5294e2")
@@ -425,19 +429,26 @@ def render_setup(w: int, h: int):
 
     steps_panel = Panel(
         tbl,
-        title="[#5294e2]SETUP WIZARD[/]  [dim](press A-G to run step)[/dim]",
+        title="[#5294e2]INDIVIDUAL STEPS[/]  [dim](A-G jalankan step)[/dim]",
         border_style="#2e2e2e", style="on #1a1a1a",
     )
 
-    out_lines = list(S.setup_out)[-(max(4, h - 18)):]
-    out_txt   = "\n".join(out_lines) if out_lines else "[dim]  Press A-G to run a setup step...[/dim]"
+    hint = Panel(
+        "  [bold #5294e2]w[/]  [#c8c8c8]Setup Wizard[/]  [dim]— konfigurasi proyek dari awal:[/dim]"
+        " install deps, isi MQTT/WA, generate .env, prisma migrate, seed admin\n"
+        "  [dim]Tekan [/dim][bold #5294e2]w[/][dim] di layar utama untuk masuk wizard[/dim]",
+        border_style="#5294e2", style="on #111a27", height=4,
+    )
+
+    out_lines = list(S.setup_out)[-(max(4, h - 22)):]
+    out_txt   = "\n".join(out_lines) if out_lines else "[dim]  Tekan A-G untuk menjalankan step individual, atau [bold]w[/bold] untuk full wizard...[/dim]"
     out_panel = Panel(
         out_txt,
         title="[#5294e2]OUTPUT[/]",
         border_style="#2e2e2e", style="on #111111",
-        height=max(6, h - 16),
+        height=max(6, h - 20),
     )
-    return Group(steps_panel, out_panel)
+    return Group(hint, steps_panel, out_panel)
 
 # ── logs ──────────────────────────────────────────────────
 def render_logs(w: int, h: int):
@@ -681,6 +692,10 @@ def handle_key(raw: bytes):
     k = raw.lower()
     if k in (b"q", b"\x03"):
         S.running = False
+    elif k == b"w":
+        # exit Live loop → wizard → restart
+        S.wizard_request = True
+        S.running = False
     elif k in _TAB_MAP:
         S.tab = _TAB_MAP[k]
     elif k == b"s":
@@ -759,38 +774,474 @@ def _load_sysinfo():
 # ══════════════════════════════════════════════════════════
 console = Console(markup=True, highlight=False)
 
+# ══════════════════════════════════════════════════════════
+#  SETUP WIZARD — from-zero project setup
+# ══════════════════════════════════════════════════════════
+
+# ── wizard helpers ────────────────────────────────────────
+_WIZ_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8",
+            "FORCE_COLOR": "0", "NO_COLOR": "1"}
+
+_STEP_LABELS = [
+    "Sys Check", "Dependencies", "YOLO Model",
+    "Network",   "WhatsApp",    "Init DB",  "Verify"
+]
+
+def _wiz_banner(step: int, total: int, title: str) -> None:
+    done  = step - 1
+    bar_w = 36
+    filled = int(done / total * bar_w)
+    pbar  = "[#5294e2]" + "━" * filled + "[/][dim]" + "╌" * (bar_w - filled) + "[/dim]"
+    labels_txt = "  ".join(
+        f"[bold #5294e2]{l}[/]" if i+1 == step else f"[dim]{l}[/dim]"
+        for i, l in enumerate(_STEP_LABELS)
+    )
+    console.print()
+    console.print(Rule(style="#2e2e2e"))
+    console.print(f"  {pbar}  [dim]step {step}/{total}[/dim]")
+    console.print(f"  [bold #c8c8c8]{title.upper()}[/]")
+    console.print(f"  [dim]{labels_txt}[/dim]")
+    console.print(Rule(style="#2e2e2e"))
+
+def _ok(msg: str)   -> None: console.print(f"  [#23c18b] OK [/]  {msg}")
+def _err(msg: str)  -> None: console.print(f"  [#e55561]FAIL[/]  {msg}")
+def _inf(msg: str)  -> None: console.print(f"  [#555555]  —  [/]  {msg}")
+def _warn(msg: str) -> None: console.print(f"  [#ffcc55]WARN[/]  {msg}")
+
+def _field(label: str, value: str = "", note: str = "") -> None:
+    """Print a labelled input field header."""
+    t = Text(f"  {label}", style="bold #8ab4f8")
+    if value:
+        t.append(f"  (default: {value})", style="dim")
+    if note:
+        t.append(f"  — {note}", style="#555555")
+    console.print(t)
+
+def _ask(label: str, default: str = "", secret: bool = False) -> str:
+    _field(label, default)
+    try:
+        val = getpass.getpass("  > ") if secret else input("  > ").strip()
+    except (EOFError, KeyboardInterrupt):
+        val = ""
+    result = val.strip() or default
+    if result and not secret:
+        console.print(f"  [dim]└ {result}[/dim]")
+    return result
+
+def _ask_yn(label: str, default: bool = False) -> bool:
+    tag = "[Y/n]" if default else "[y/N]"
+    console.print(f"  [bold #8ab4f8]{label}[/bold #8ab4f8] [dim]{tag}[/dim]")
+    try:
+        ans = input("  > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        ans = ""
+    return (ans in ("y", "ya", "yes")) if ans else default
+
+# line filter for noisy tool output
+_SKIP_PREFIXES = (
+    "Requirement already satisfied",
+    "already up to date",
+    "A new release of pip",
+    "To update, run:",
+    "  └",
+)
+
+def _run_wiz_cmd(cmd: list, cwd: str, label: str) -> bool:
+    display = " ".join(str(c) for c in cmd)
+    console.print(f"\n  [dim]$ {display}[/dim]")
+    buf: list[str] = []
+    ok  = True
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            encoding="utf-8", errors="replace",
+            shell=(platform.system() == "Windows"),
+            env=_WIZ_ENV,
+        )
+        spin = r"|/-\\"
+        idx  = 0
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            buf.append(line)
+            # live spinner (overwrites same line, no scroll)
+            sys.stdout.write(f"\r  [{spin[idx % 4]}] {line[:70]:<70}")
+            sys.stdout.flush()
+            idx += 1
+        proc.wait()
+        ok = proc.returncode == 0
+    except Exception as e:
+        _err(f"exception: {e}")
+        return False
+
+    # clear spinner line
+    sys.stdout.write("\r" + " " * 78 + "\r")
+    sys.stdout.flush()
+
+    # print only interesting output (filter noise)
+    shown = [l for l in buf if l.strip() and not any(l.startswith(p) for p in _SKIP_PREFIXES)]
+    for l in shown[-12:]:
+        console.print(f"  [dim]{l}[/dim]")
+
+    if ok:
+        _ok(label)
+    else:
+        _err(f"{label}  (exit {proc.returncode})")
+    return ok
+
+def _gen_env_files(cfg: dict) -> tuple[str, str, str]:
+    """Generate .env and .env.local, return (token, enc_key, jwt_secret)."""
+    token      = secrets.token_hex(32)
+    enc_key    = base64.b64encode(secrets.token_bytes(32)).decode()
+    jwt_secret = secrets.token_hex(32)
+    na_secret  = secrets.token_hex(32)
+    now_str    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    env_root = f"""# SafeGuard APD — Backend Configuration
+# Generated by TUI Setup Wizard  {now_str}
+
+# Database (SQLite, relative to project root)
+DATABASE_URL="file:./web-dashboard/data/safeguard.db"
+
+# Auth
+JWT_SECRET={jwt_secret}
+NEXTAUTH_URL={cfg.get('app_url', 'http://localhost:3000')}
+
+# Service token — MUST match .env.local
+APD_SERVICE_TOKEN={token}
+APD_ENCRYPTION_KEY={enc_key}
+
+# YOLO model
+YOLO_MODEL_PATH={cfg.get('model_path', './best.pt')}
+
+# Node detection endpoint (where Next.js runs)
+NODE_DETECTION_URL={cfg.get('app_url', 'http://localhost:3000')}
+
+# MQTT broker
+MQTT_BROKER_HOST={cfg.get('mqtt_host', '')}
+MQTT_BROKER_PORT={cfg.get('mqtt_port', '1883')}
+MQTT_TLS_PORT={cfg.get('mqtt_tls', '8883')}
+MQTT_USERNAME={cfg.get('mqtt_user', '')}
+MQTT_PASSWORD={cfg.get('mqtt_pass', '')}
+
+# WhatsApp / GoWA (optional)
+WA_API_URL={cfg.get('wa_url', '')}
+WA_DEVICE_ID={cfg.get('wa_device', '')}
+"""
+
+    env_local = f"""# SafeGuard APD — Next.js Configuration
+# Generated by TUI Setup Wizard  {now_str}
+
+# Database (relative to web-dashboard/)
+DATABASE_URL="file:./data/safeguard.db"
+
+# NextAuth
+NEXTAUTH_SECRET={na_secret}
+NEXTAUTH_URL={cfg.get('app_url', 'http://localhost:3000')}
+
+# Service token — MUST match root .env
+APD_SERVICE_TOKEN={token}
+APD_ENCRYPTION_KEY={enc_key}
+"""
+
+    ENV_FILE.write_text(env_root,  encoding="utf-8")
+    ENV_LOCAL.write_text(env_local, encoding="utf-8")
+    return token, enc_key, jwt_secret
+
+
+def run_wizard() -> None:
+    """
+    Full from-zero setup wizard.
+    Runs outside the Live display (uses regular terminal I/O).
+    """
+    console.clear()
+
+    # ── Welcome banner ────────────────────────────────────
+    console.print()
+    console.print(Panel(
+        Text.from_markup(
+            "  [bold #5294e2]SAFEGUARD APD — SETUP WIZARD[/bold #5294e2]\n"
+            "  [dim]Konfigurasi proyek dari awal. Tekan Enter untuk nilai default.[/dim]\n"
+            "  [dim]Ctrl+C kapan saja untuk keluar.[/dim]"
+        ),
+        border_style="#5294e2", style="on #0d1117", padding=(1, 2),
+    ))
+
+    tbl_steps = Table(show_header=False, box=None, padding=(0,1), style="on #0d1117")
+    tbl_steps.add_column("n",   style="bold #5294e2", width=3)
+    tbl_steps.add_column("ttl", style="#7a7a7a")
+    for i, (_, lbl) in enumerate(zip(range(7), [
+        "System Requirements Check",
+        "Install Python & Node.js dependencies",
+        "YOLO model path",
+        "App URL & MQTT broker",
+        "WhatsApp notification (optional)",
+        "Generate .env files & init database",
+        "Verification summary",
+    ])):
+        tbl_steps.add_row(f"{i+1}.", lbl)
+    console.print(tbl_steps)
+    console.print()
+
+    TOTAL = 7
+    cfg: dict = {}
+
+    # ── STEP 1: System requirements ──────────────────────
+    _wiz_banner(1, TOTAL, "System Requirements Check")
+    all_ok = True
+
+    pv  = platform.python_version()
+    p_ok = tuple(int(x) for x in pv.split(".")[:2]) >= (3, 10)
+    (_ok if p_ok else _err)(f"Python {pv}  {'OK' if p_ok else 'requires >= 3.10'}")
+    all_ok = all_ok and p_ok
+
+    node_bin = shutil.which("node") or shutil.which("node.exe")
+    if node_bin:
+        try:
+            r   = subprocess.run([node_bin, "--version"], capture_output=True, text=True, timeout=5)
+            nv  = r.stdout.strip().lstrip("v")
+            n_ok = int(nv.split(".")[0]) >= 18
+            (_ok if n_ok else _err)(f"Node.js v{nv}  {'OK' if n_ok else 'requires >= 18'}")
+            all_ok = all_ok and n_ok
+        except Exception:
+            _err("Node.js — versi tidak terbaca")
+            all_ok = False
+    else:
+        _err("Node.js — NOT FOUND  (install dari https://nodejs.org)")
+        all_ok = False
+
+    npm_bin = shutil.which("npm") or shutil.which("npm.cmd")
+    (_ok if npm_bin else _err)(f"npm — {'found: ' + str(npm_bin) if npm_bin else 'NOT FOUND'}")
+    all_ok = all_ok and bool(npm_bin)
+
+    git_bin = shutil.which("git")
+    (_ok if git_bin else _warn)(f"git — {'found' if git_bin else 'tidak ditemukan (opsional)'}")
+
+    if not all_ok:
+        _warn("Ada requirement yang belum terpenuhi. Install dulu lalu jalankan ulang wizard.")
+        if not _ask_yn("Lanjut tetap?", default=False):
+            return
+
+    # ── STEP 2: Install dependencies ─────────────────────
+    _wiz_banner(2, TOTAL, "Install Dependencies")
+
+    console.print("  [dim]Menginstall Python packages...[/dim]")
+    _run_wiz_cmd(
+        [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+        str(BASE_DIR), "pip install -r requirements.txt"
+    )
+
+    console.print()
+    if not DASHBOARD_DIR.exists():
+        _err(f"web-dashboard/ tidak ditemukan di {BASE_DIR}")
+        _warn("Pastikan repo di-clone lengkap.")
+    else:
+        console.print("  [dim]Menginstall Node.js packages (npm install)...[/dim]")
+        _run_wiz_cmd(["npm", "install"], str(DASHBOARD_DIR), "npm install")
+
+    # ── STEP 3: Model path ────────────────────────────────
+    _wiz_banner(3, TOTAL, "YOLO Model Configuration")
+
+    # scan for .pt files
+    pt_files = sorted(BASE_DIR.rglob("*.pt"), key=lambda p: p.stat().st_size, reverse=True)[:8]
+    if pt_files:
+        console.print("  [dim]File model (.pt) yang ditemukan:[/dim]")
+        tbl = Table(show_header=False, box=None, padding=(0,2))
+        tbl.add_column("", style="#8ab4f8")
+        tbl.add_column("", style="#555555")
+        for f in pt_files:
+            tbl.add_row(str(f.relative_to(BASE_DIR)), fmt_bytes(f.stat().st_size))
+        console.print(tbl)
+    else:
+        _warn("Tidak ada file .pt ditemukan. Masukkan path manual.")
+
+    cfg["model_path"] = _ask(
+        "Path ke YOLO model (.pt)",
+        default=str(pt_files[0].relative_to(BASE_DIR)) if pt_files else "./best.pt"
+    )
+    # normalize to forward slashes
+    cfg["model_path"] = cfg["model_path"].replace("\\", "/")
+
+    # ── STEP 4: App & MQTT config ─────────────────────────
+    _wiz_banner(4, TOTAL, "Aplikasi & Network Configuration")
+
+    cfg["app_url"] = _ask("URL Aplikasi (Next.js)", default="http://localhost:3000")
+
+    console.print()
+    console.print("  [bold]MQTT Broker[/bold]  [dim](untuk komunikasi ESP32/sensor)[/dim]")
+    cfg["mqtt_host"] = _ask("  MQTT Broker host", default="broker.hivemq.com")
+    cfg["mqtt_port"] = _ask("  MQTT Port (non-TLS)", default="1883")
+    cfg["mqtt_tls"]  = _ask("  MQTT Port TLS",      default="8883")
+    cfg["mqtt_user"] = _ask("  MQTT Username",      default="")
+    if cfg["mqtt_user"]:
+        cfg["mqtt_pass"] = _ask("  MQTT Password", default="", secret=True)
+    else:
+        cfg["mqtt_pass"] = ""
+
+    # ── STEP 5: WhatsApp ──────────────────────────────────
+    _wiz_banner(5, TOTAL, "WhatsApp Notification (opsional)")
+    _inf("WhatsApp digunakan untuk kirim alert pelanggaran APD ke admin.")
+
+    use_wa = _ask_yn("Aktifkan notifikasi WhatsApp?", default=False)
+    if use_wa:
+        cfg["wa_url"]    = _ask("  GoWA API URL",  default="http://localhost:3000")
+        cfg["wa_device"] = _ask("  GoWA Device ID", default="")
+    else:
+        cfg["wa_url"] = cfg["wa_device"] = ""
+        _inf("Dilewati. Bisa dikonfigurasi nanti di Config tab.")
+
+    # ── STEP 6: Generate .env & init DB ───────────────────
+    _wiz_banner(6, TOTAL, "Generate Config & Inisialisasi Database")
+
+    # Backup existing (fix filenames)
+    if ENV_FILE.exists():
+        bak = ENV_FILE.parent / ".env.bak"
+        ENV_FILE.replace(bak)
+        _inf(f".env lama disimpan ke  .env.bak")
+    if ENV_LOCAL.exists():
+        bak2 = ENV_LOCAL.parent / ".env.local.bak"
+        ENV_LOCAL.replace(bak2)
+        _inf(f".env.local lama disimpan ke  .env.local.bak")
+
+    # Generate
+    token, enc_key, jwt_secret = _gen_env_files(cfg)
+    _ok(f".env  →  {ENV_FILE}")
+    _ok(f".env.local  →  {ENV_LOCAL}")
+    console.print(f"  [dim]APD_SERVICE_TOKEN  {token[:8]}...{token[-4:]}  (disimpan ke kedua file)[/dim]")
+
+    # Ensure DB dir exists
+    db_dir = DASHBOARD_DIR / "data"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    _ok(f"Direktori database: {db_dir}")
+
+    # Prisma migrate
+    console.print()
+    console.print("  [dim]Menjalankan prisma migrate deploy...[/dim]")
+    _run_wiz_cmd(
+        ["npx", "prisma", "migrate", "deploy"],
+        str(DASHBOARD_DIR), "prisma migrate deploy"
+    )
+
+    # npm run seed
+    console.print()
+    console.print("  [dim]Menjalankan npm run seed (buat akun admin)...[/dim]")
+    seed_ok = _run_wiz_cmd(
+        ["npm", "run", "seed"],
+        str(DASHBOARD_DIR), "npm run seed"
+    )
+    if seed_ok:
+        _warn("Catat password admin yang tampil di output di atas!")
+
+    # ── STEP 7: Verifikasi ────────────────────────────────
+    _wiz_banner(7, TOTAL, "Verifikasi")
+
+    # Check .env files
+    (_ok if ENV_FILE.exists()  else _err)(f".env  {'ada' if ENV_FILE.exists() else 'TIDAK ADA'}")
+    (_ok if ENV_LOCAL.exists() else _err)(f".env.local  {'ada' if ENV_LOCAL.exists() else 'TIDAK ADA'}")
+    (_ok if DB_FILE.exists()   else _inf)(f"Database  {'ada ({} KB)'.format(DB_FILE.stat().st_size//1024) if DB_FILE.exists() else 'belum ada (normal — akan dibuat saat dijalankan)'}")
+
+    # Check token sync
+    t1 = read_env(ENV_FILE).get("APD_SERVICE_TOKEN","")
+    t2 = read_env(ENV_LOCAL).get("APD_SERVICE_TOKEN","")
+    (_ok if (t1 and t1==t2) else _err)("APD_SERVICE_TOKEN sync" if (t1 and t1==t2) else "APD_SERVICE_TOKEN MISMATCH")
+
+    # Check model
+    model_p = BASE_DIR / cfg.get("model_path","best.pt")
+    (_ok if model_p.exists() else _warn)(
+        f"Model {cfg.get('model_path')}  {'ditemukan' if model_p.exists() else 'TIDAK ADA — letakkan file .pt sebelum menjalankan backend'}"
+    )
+
+    # Summary table
+    console.print()
+    t_sum = Table(show_header=True, header_style="bold #5294e2",
+                  style="on #0e1a13", border_style="#23c18b",
+                  show_edge=True, padding=(0, 1))
+    t_sum.add_column("Key")
+    t_sum.add_column("Value", style="#c8c8c8")
+    t_sum.add_row("Model",        cfg.get('model_path', '-'))
+    t_sum.add_row("App URL",      cfg.get('app_url', '-'))
+    t_sum.add_row("MQTT host",    cfg.get('mqtt_host', '-'))
+    t_sum.add_row("MQTT port",    cfg.get('mqtt_port', '-'))
+    t_sum.add_row("WhatsApp",     "aktif" if cfg.get('wa_url') else "tidak aktif")
+    t_sum.add_row(".env",         "[#23c18b]OK[/]" if ENV_FILE.exists()  else "[#e55561]MISSING[/]")
+    t_sum.add_row(".env.local",   "[#23c18b]OK[/]" if ENV_LOCAL.exists() else "[#e55561]MISSING[/]")
+    t_sum.add_row("Token sync",   "[#23c18b]SYNCED[/]" if (t1 and t1 == t2) else "[#e55561]MISMATCH[/]")
+    console.print(Panel(
+        Group(
+            Text("  SETUP SELESAI!", style="bold #23c18b"),
+            Text(""),
+            t_sum,
+            Text(""),
+            Text("  Langkah selanjutnya:", style="bold"),
+            Text(f"  1. python tui.py  →  tekan  s  Start All", style="#c8c8c8"),
+            Text(f"  2. Buka browser →  {cfg.get('app_url', 'http://localhost:3000')}", style="#c8c8c8"),
+            Text( "  3. Login dengan akun admin dari output seed di atas", style="#c8c8c8"),
+        ),
+        border_style="#23c18b", style="on #0e1a13", padding=(1, 2),
+    ))
+    console.print()
+    input("  Tekan Enter untuk kembali ke TUI...")
+
+
+# ══════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════
+
 def main():
+    # ── first-run detection ────────────────────────────────
+    if not ENV_LOCAL.exists():
+        console.clear()
+        console.print(Panel(
+            "[bold #ffcc55]Setup belum dilakukan![/bold #ffcc55]\n"
+            "[dim].env.local tidak ditemukan. Jalankan Setup Wizard untuk\n"
+            "mengkonfigurasi proyek dari awal.[/dim]",
+            border_style="#ffcc55", style="on #1a170e"
+        ))
+        if _ask_yn("Mulai Setup Wizard sekarang?", default=True):
+            run_wizard()
+        console.print()
+
     # prime psutil
     psutil.cpu_percent(interval=None)
     try:
-        S._net0 = psutil.net_io_counters()
+        S._net0  = psutil.net_io_counters()
         S._net_t = time.time()
     except Exception:
         pass
 
     # background sysinfo
     threading.Thread(target=_load_sysinfo, daemon=True).start()
-
     # keyboard thread
     threading.Thread(target=keyboard_loop, daemon=True).start()
 
-    S.emit("SafeGuard APD TUI ready  |  1-6 tabs  |  s start-all  |  q quit")
+    S.emit("SafeGuard APD TUI ready  |  1-6 tabs  |  w=wizard  |  s start-all  |  q quit")
 
-    try:
-        with Live(
-            make_screen(),
-            console=console,
-            refresh_per_second=4,
-            screen=True,
-        ) as live:
-            while S.running:
-                try:
-                    live.update(make_screen(), refresh=True)
-                except Exception:
-                    pass
-                time.sleep(0.25)
-    except KeyboardInterrupt:
-        pass
+    while True:
+        S.running        = True
+        S.wizard_request = False
+
+        try:
+            with Live(
+                make_screen(),
+                console=console,
+                refresh_per_second=4,
+                screen=True,
+            ) as live:
+                while S.running:
+                    try:
+                        live.update(make_screen(), refresh=True)
+                    except Exception:
+                        pass
+                    time.sleep(0.25)
+        except KeyboardInterrupt:
+            break
+
+        # if wizard was requested, run it then loop back
+        if getattr(S, "wizard_request", False):
+            run_wizard()
+        else:
+            break
 
     console.clear()
     console.print("\n  [#5294e2]SafeGuard APD TUI — bye.[/]\n")
