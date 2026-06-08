@@ -1,6 +1,9 @@
-train: E:\pycham pbl\CHV-YOLOv8\train\images
-val: E:\pycham pbl\CHV-YOLOv8\valid\images
-test: E:\pycham pbl\CHV-YOLOv8\test\images
+# Dataset Construction Helmet & Vest (CHV) — YOLOv8 format.
+# Path relatif ke file ini (data.yaml). Ultralytics resolve otomatis.
+
+train: ./train/images
+val: ./valid/images
+test: ./test/images
 
 nc: 2
 names:

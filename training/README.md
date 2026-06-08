@@ -53,14 +53,6 @@ copy runs\detect\ppe_training\helmet_vest_v1\weights\best.pt models\ppe_best.pt
 
 Restart backend Python (`python ServiceAPDBackend.py`) — model baru otomatis di-load.
 
-### 5. Upload ke Roboflow (opsional)
-
-```bash
-python training/upload_model_to_roboflow.py
-```
-
-Upload weights dan dataset ke Roboflow project untuk hosted inference. Edit `WORKSPACE`/`PROJECT_ID` di file dulu.
-
 ## Override via Environment
 
 ```bash
