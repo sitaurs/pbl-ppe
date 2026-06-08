@@ -1,0 +1,46 @@
+==============================================================
+  CATATAN — File audio SPIFFS untuk ESP32 alarm APD
+==============================================================
+
+File apd_alert.mp3 SUDAH ADA di folder ini (di-generate via gTTS).
+
+Untuk me-regenerate file audio (mis. ubah teks atau bahasa):
+    python alarm_apd/generate_audio.py --force
+
+Untuk generate ulang dengan gTTS (butuh internet):
+    pip install gtts
+    python alarm_apd/generate_audio.py
+
+SPESIFIKASI AUDIO (apd_alert.mp3):
+------------------------------------
+- Format  : MP3 (Google TTS output)
+- Bahasa  : Bahasa Indonesia (id)
+- Konten  : "Peringatan, gunakan APD lengkap. Pastikan helm,
+             rompi, dan sepatu safety Anda sudah terpasang."
+- Durasi  : ~5 detik
+- Ukuran  : ~70 KB
+
+UPLOAD KE SPIFFS ESP32:
+--------------------------
+Lihat panduan lengkap di alarm_apd/README.md
+
+Cara singkat:
+  a) Arduino IDE 1.x:
+     - Install plugin: https://github.com/me-no-dev/arduino-esp32fs-plugin
+     - Di IDE: Tools > ESP32 Sketch Data Upload
+  b) Arduino IDE 2.x:
+     - Install plugin "Sketch Data Upload" (Extension Manager)
+  c) PlatformIO:
+     - pio run -t uploadfs
+
+UKURAN PARTISI SPIFFS:
+-----------------------
+Partisi SPIFFS default ESP32 ~1 MB.
+Audio ~70 KB → jauh dari batas.
+
+REFERENSI:
+-----------
+- Requirements 9.1, 9.2, 9.3
+- Design §4.5 (SPIFFS Audio)
+- alarm_apd/README.md (wiring + upload guide)
+

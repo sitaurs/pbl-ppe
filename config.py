@@ -27,10 +27,37 @@ MQTT_TOPIC_VIOLATION: str = os.getenv("MQTT_TOPIC_VIOLATION", "APD_Violation")
 MQTT_TOPIC_FRAME: str = os.getenv("MQTT_TOPIC_FRAME", "VideoFrame")
 
 # ============================================================
-# AES128 Encryption (key dan iv HARUS 16 bytes)
+# AES-128-CBC Encryption
+#
+# AES_KEY harus berupa string hex 32 karakter (= 16 byte setelah decode).
+# Generate dengan:
+#   python -c "import secrets; print(secrets.token_hex(16))"
+#
+# IV di-randomize per pesan dan di-prepend ke ciphertext (lihat
+# encrypt_aes128 di ServiceAPDBackend.py), jadi AES_IV TIDAK lagi disimpan
+# di .env. Lihat requirements 4.1, 4.2, 5.4.
 # ============================================================
-AES_KEY: bytes = os.getenv("AES_KEY", "16bytekey1234567").encode("utf-8")[:16]
-AES_IV: bytes = os.getenv("AES_IV", "16byteiv12345678").encode("utf-8")[:16]
+_AES_KEY_HEX: str = os.getenv("AES_KEY", "").strip()
+
+if _AES_KEY_HEX:
+    try:
+        AES_KEY: bytes = bytes.fromhex(_AES_KEY_HEX)
+    except ValueError as exc:
+        raise ValueError(
+            "AES_KEY in .env must be a hexadecimal string. "
+            "Generate one with: "
+            'python -c "import secrets; print(secrets.token_hex(16))"'
+        ) from exc
+
+    if len(AES_KEY) != 16:
+        raise ValueError(
+            f"AES_KEY must decode to exactly 16 bytes (got {len(AES_KEY)} bytes "
+            f"from {len(_AES_KEY_HEX)} hex chars). Use a 32-character hex string."
+        )
+else:
+    # Kosong → dibiarkan agar startup validation di ServiceAPDBackend.py
+    # (REQUIRED_ENV) memunculkan error yang konsisten dengan env wajib lain.
+    AES_KEY: bytes = b""
 
 # ============================================================
 # WhatsApp API (GoWA self-hosted)

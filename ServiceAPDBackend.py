@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -26,7 +26,7 @@ import paho.mqtt.client as mqtt
 import torch
 import websockets
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad, unpad
 from ultralytics import YOLO
 
 # Konfigurasi terpusat dari .env
@@ -67,6 +67,28 @@ WA_DEVICE_ID = config.WA_DEVICE_ID
 # Semua endpoint /api/* di Next.js kini diproteksi middleware auth/RBAC.
 # Python backend pakai Service Token (bypass session + CSRF) lewat loopback 127.0.0.1.
 DASHBOARD_HEADERS = {"Authorization": f"Bearer {APD_SERVICE_TOKEN}"} if APD_SERVICE_TOKEN else {}
+
+# =========================
+# Validasi env wajib (Requirement 5.4)
+# =========================
+# Service tidak boleh jalan dengan kredensial default lemah. Bila salah satu env
+# critical kosong, log error eksplisit dan exit dengan code != 0 supaya operator
+# segera memperbaiki .env (bukan diam-diam jalan dengan fallback).
+REQUIRED_ENV = [
+    "MQTT_HOSTNAME",
+    "MQTT_USERNAME",
+    "MQTT_PASSWORD",
+    "AES_KEY",
+    "APD_SERVICE_TOKEN",
+]
+_missing_env = [k for k in REQUIRED_ENV if not os.getenv(k)]
+if _missing_env:
+    logger.error(
+        "Missing required env vars: %s. Periksa file .env (lihat .env.example).",
+        _missing_env,
+    )
+    sys.exit(1)
+
 
 def get_registered_nodes():
     """Ambil daftar node aktif dari Dashboard API (sumber tunggal kebenaran).
@@ -221,7 +243,6 @@ MQTT_TOPIC_FRAME: str = config.MQTT_TOPIC_FRAME
 MQTT_ENABLED: bool = True
 
 AES_KEY: bytes = config.AES_KEY
-AES_IV: bytes = config.AES_IV
 AES_MODE: int = AES.MODE_CBC
 
 CONFIDENCE_THRESHOLD: float = config.CONFIDENCE_THRESHOLD
@@ -245,6 +266,19 @@ COLOR_VIOLATION = (0, 0, 255)   # Merah
 WEBSOCKET_HOST: str = config.WEBSOCKET_HOST
 WEBSOCKET_PORT: int = config.WEBSOCKET_PORT
 
+# =========================
+# Gas telemetry (Requirement 8.3, 8.4, 8.7)
+# =========================
+# Wildcard topic untuk telemetri MQ-135 dari semua ESP32. Setiap node publish
+# ke `apd/telemetry/gas/<nodeId>` dengan payload JSON terenkripsi AES-128-CBC.
+GAS_TELEMETRY_TOPIC: str = "apd/telemetry/gas/+"
+# Setelah alert sustained selama N detik, kirim WA. Sesuai requirement 8.7.
+GAS_ALERT_SUSTAIN_SECONDS: int = 30
+# Cooldown antar WA gas alert per-node supaya tidak spam saat alert lama bertahan.
+GAS_ALERT_WA_COOLDOWN_SECONDS: int = 600  # 10 menit
+# Refresh interval cache nodes untuk lookup PIC saat kirim WA.
+NODES_CACHE_TTL_SECONDS: int = 60
+
 class APDDetectionService:
     def __init__(self):
         self.model = None
@@ -262,14 +296,54 @@ class APDDetectionService:
         # Thread kamera
         self.camera_threads = []
 
+        # State gas telemetry per-node untuk deteksi alert sustained > 30 detik
+        # (Requirement 8.7). Key = nodeId (int), value = dict:
+        #   { "alert_since": float | None, "last_wa_at": float, "sektor_id": str }
+        self.gas_alert_state = {}
+        self.gas_alert_lock = threading.Lock()
+
+        # Cache daftar node untuk lookup PIC saat kirim WA gas. Refresh setiap
+        # NODES_CACHE_TTL_SECONDS supaya perubahan PIC di dashboard ter-pickup
+        # tanpa restart service.
+        self._nodes_cache = []
+        self._nodes_cache_at = 0.0
+        self._nodes_cache_lock = threading.Lock()
+
     @staticmethod
     def encrypt_aes128(plaintext):
+        """Encrypt plaintext dengan AES-128-CBC dan random IV per-pesan.
+
+        Format output: base64(IV[16 byte] || ciphertext). IV bukan rahasia,
+        tapi WAJIB unik per pesan untuk mencegah pola CBC yang bisa dianalisis.
+        ESP32 firmware mengekstrak 16 byte pertama sebagai IV lalu decrypt
+        sisanya. Lihat requirements 4.2 dan 4.6.
+        """
         try:
-            cipher = AES.new(AES_KEY, AES_MODE, AES_IV)
+            iv = os.urandom(16)
+            cipher = AES.new(AES_KEY, AES_MODE, iv)
             plaintext_bytes = plaintext.encode("utf-8") if isinstance(plaintext, str) else plaintext
             padded_data = pad(plaintext_bytes, AES.block_size)
             encrypted_bytes = cipher.encrypt(padded_data)
-            return base64.b64encode(encrypted_bytes).decode("utf-8")
+            return base64.b64encode(iv + encrypted_bytes).decode("utf-8")
+        except Exception:
+            return None
+
+    @staticmethod
+    def decrypt_aes128(b64_str):
+        """Decrypt base64(IV || ciphertext) yang diterima dari ESP32.
+
+        Dipakai untuk telemetri masuk (misal payload sensor gas MQ-135 yang
+        di-publish ESP32 ke topic `apd/telemetry/gas/{nodeId}`). Return
+        plaintext string UTF-8 atau None bila gagal.
+        """
+        try:
+            raw = base64.b64decode(b64_str)
+            if len(raw) < 32:  # min 16 IV + 16 satu blok ciphertext
+                return None
+            iv, ct = raw[:16], raw[16:]
+            cipher = AES.new(AES_KEY, AES_MODE, iv)
+            plaintext = unpad(cipher.decrypt(ct), AES.block_size)
+            return plaintext.decode("utf-8")
         except Exception:
             return None
 
@@ -296,6 +370,189 @@ class APDDetectionService:
             logger.error(f"Failed to load YOLO models: {e}")
             return False
 
+    # =========================
+    # Gas telemetry helpers
+    # =========================
+
+    def _get_cached_nodes(self):
+        """Kembalikan daftar node dari cache; refresh jika sudah kedaluwarsa.
+
+        Cache TTL diatur via NODES_CACHE_TTL_SECONDS supaya perubahan PIC di
+        dashboard ter-pickup tanpa restart service (Requirement 8.7).
+        """
+        now = time.time()
+        with self._nodes_cache_lock:
+            if now - self._nodes_cache_at > NODES_CACHE_TTL_SECONDS:
+                try:
+                    self._nodes_cache = get_registered_nodes()
+                    self._nodes_cache_at = now
+                except Exception as e:
+                    logger.warning(f"Gagal refresh nodes cache: {e}")
+            return list(self._nodes_cache)
+
+    def handle_gas_telemetry(self, data: dict):
+        """Proses satu pesan telemetri gas yang sudah di-decrypt.
+
+        Langkah:
+        1. Forward ke POST /api/telemetry/gas (Requirement 8.4).
+        2. Track alert sustained > 30 detik → kirim WA ke PIC sektor
+           (Requirement 8.7).
+        """
+        node_id = data.get("nodeId")
+        sektor_id = data.get("sektorId", "")
+        is_alert = data.get("alert", False)
+        raw_value = data.get("raw", 0)
+
+        # 1. Forward ke Next.js Dashboard (Requirement 8.4)
+        try:
+            headers = dict(DASHBOARD_HEADERS)
+            headers["Content-Type"] = "application/json"
+            resp = requests.post(
+                f"{DASHBOARD_API_URL}/api/telemetry/gas",
+                json=data,
+                headers=headers,
+                timeout=5,
+            )
+            if resp.status_code not in (200, 201):
+                logger.warning(
+                    f"[GasTelemetry] POST /api/telemetry/gas gagal status={resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+            else:
+                logger.debug(
+                    f"[GasTelemetry] nodeId={node_id} raw={raw_value} alert={is_alert} → forwarded."
+                )
+        except Exception as e:
+            logger.error(f"[GasTelemetry] Gagal forward ke dashboard: {e}")
+
+        # 2. Sustained-alert tracking → WA notification (Requirement 8.7)
+        now = time.time()
+        with self.gas_alert_lock:
+            state = self.gas_alert_state.setdefault(
+                node_id,
+                {"alert_since": None, "last_wa_at": 0.0, "sektor_id": sektor_id},
+            )
+            state["sektor_id"] = sektor_id  # update jaga-jaga berubah
+
+            if is_alert:
+                if state["alert_since"] is None:
+                    # Alert baru mulai
+                    state["alert_since"] = now
+                    logger.info(
+                        f"[GasTelemetry] nodeId={node_id} sektor={sektor_id} — "
+                        f"gas alert dimulai (raw={raw_value})."
+                    )
+
+                alert_duration = now - state["alert_since"]
+                wa_cooldown_ok = (now - state["last_wa_at"]) > GAS_ALERT_WA_COOLDOWN_SECONDS
+
+                if alert_duration >= GAS_ALERT_SUSTAIN_SECONDS and wa_cooldown_ok:
+                    # Alert sudah bertahan > 30 detik dan cooldown WA selesai → kirim WA
+                    state["last_wa_at"] = now
+                    # Jalankan di thread terpisah agar tidak blokir loop MQTT
+                    threading.Thread(
+                        target=self._send_gas_alert_wa,
+                        args=(node_id, sektor_id, raw_value, int(alert_duration)),
+                        daemon=True,
+                    ).start()
+            else:
+                if state["alert_since"] is not None:
+                    logger.info(
+                        f"[GasTelemetry] nodeId={node_id} sektor={sektor_id} — "
+                        f"gas alert selesai (kembali normal)."
+                    )
+                state["alert_since"] = None
+
+    def _send_gas_alert_wa(self, node_id, sektor_id: str, raw_value: int, duration_sec: int):
+        """Kirim notifikasi WA untuk gas alert yang sudah bertahan > 30 detik.
+
+        Lookup PIC dari cache nodes; jika tidak ketemu, tetap log peringatan.
+        Sesuai Requirement 8.7.
+        """
+        # Cari PIC berdasarkan nodeId atau sektorId
+        nodes = self._get_cached_nodes()
+        pic_phone = None
+        pic_name = "Unknown"
+        sektor_name = sektor_id
+
+        for n in nodes:
+            if n.get("id") == node_id or n.get("sektorId") == sektor_id:
+                pic_phone = n.get("picPhone")
+                pic_name = n.get("picName", "Unknown")
+                sektor_name = n.get("sektorName", sektor_id)
+                break
+
+        if not pic_phone:
+            logger.warning(
+                f"[GasTelemetry] Gas alert sustained nodeId={node_id} sektor={sektor_id} "
+                f"tapi tidak ada picPhone terdaftar. Skip WA."
+            )
+            return
+
+        message = (
+            f"⚠️ *ALERT GAS BERBAHAYA* ⚠️\n\n"
+            f"📍 Sektor: {sektor_name}\n"
+            f"👤 PIC: {pic_name}\n"
+            f"🌡 Nilai Sensor (ADC raw): {raw_value}\n"
+            f"⏱ Durasi alert: {duration_sec} detik\n"
+            f"🕐 Waktu: {datetime.now().strftime('%d/%m/%Y %H:%M:%S WIB')}\n\n"
+            f"Segera periksa kondisi udara di area tersebut!"
+        )
+        logger.info(
+            f"[GasTelemetry] Mengirim WA gas alert ke {pic_name} ({pic_phone}), "
+            f"nodeId={node_id}, durasi={duration_sec}s."
+        )
+        success, status = send_whatsapp_alert(pic_phone, message)
+        if success:
+            logger.info(f"[GasTelemetry] WA gas alert terkirim ke {pic_phone}.")
+        else:
+            logger.error(f"[GasTelemetry] WA gas alert GAGAL dikirim ke {pic_phone} (status={status}).")
+
+    # =========================
+    # MQTT callbacks
+    # =========================
+
+    def _on_mqtt_connect(self, client, userdata, flags, rc):
+        """Callback setelah MQTT connect. Subscribe ke wildcard gas telemetry topic.
+
+        Menggunakan on_connect agar re-subscribe otomatis terjadi bila broker
+        disconnect lalu reconnect (behavior standar paho-mqtt). Requirement 8.3.
+        """
+        if rc == 0:
+            logger.info(
+                f"[MQTT] Connected ke broker. "
+                f"Subscribing ke wildcard topic: {GAS_TELEMETRY_TOPIC}"
+            )
+            client.subscribe(GAS_TELEMETRY_TOPIC, qos=1)
+        else:
+            logger.warning(f"[MQTT] Connect callback rc={rc} (non-zero = gagal).")
+
+    def _on_mqtt_message(self, client, userdata, msg):
+        """Callback routing pesan MQTT masuk berdasarkan topic.
+
+        Saat ini hanya handle gas telemetry. Struktur if/elif memudahkan
+        penambahan handler lain di masa depan (misal heartbeat, OTA ack).
+        Requirement 8.3, 8.4.
+        """
+        topic: str = msg.topic
+        try:
+            if topic.startswith("apd/telemetry/gas/"):
+                raw_payload = msg.payload.decode("utf-8").strip()
+                plain = self.decrypt_aes128(raw_payload)
+                if plain is None:
+                    logger.warning(
+                        f"[MQTT] Gagal decrypt pesan dari {topic}. "
+                        f"Payload (truncated): {raw_payload[:80]}"
+                    )
+                    return
+                data = json.loads(plain)
+                self.handle_gas_telemetry(data)
+            # Tambah elif untuk topic lain di sini bila perlu
+        except json.JSONDecodeError as e:
+            logger.warning(f"[MQTT] JSON parse error dari {topic}: {e}")
+        except Exception as e:
+            logger.warning(f"[MQTT] Error handle pesan dari {topic}: {e}")
+
     def setup_mqtt(self):
         if not MQTT_ENABLED: return False
         try:
@@ -304,12 +561,17 @@ class APDDetectionService:
                 self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id, clean_session=True)
             except Exception:
                 self.mqtt_client = mqtt.Client(client_id=client_id, clean_session=True)
-            
+
             self.mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
             # Hanya pakai TLS kalau port 8883 (cloud broker)
             if MQTT_PORT == 8883:
                 self.mqtt_client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-            
+
+            # Daftarkan callbacks sebelum connect supaya on_connect dipanggil
+            # saat TCP handshake selesai (termasuk saat reconnect otomatis).
+            self.mqtt_client.on_connect = self._on_mqtt_connect
+            self.mqtt_client.on_message = self._on_mqtt_message
+
             logger.info(f"Connecting to MQTT at {MQTT_HOSTNAME}:{MQTT_PORT}")
             self.mqtt_client.connect(MQTT_HOSTNAME, MQTT_PORT, 60)
             self.mqtt_client.loop_start()
@@ -474,12 +736,38 @@ class APDDetectionService:
                 if has_violation and (current_time - last_notification_time) > COOLDOWN_SECONDS:
                     violation_names = [v["class"].replace("_", " ") for v in violations]
                     
-                    # Kirim MQTT Alert Terenkripsi
+                    # Kirim MQTT Alert Terenkripsi ke topic per-node (Requirement 3.1-3.3).
+                    # Backend tidak lagi publish ke topic global `APD_Violation`. Setiap
+                    # ESP32 punya topic sendiri (`apd/alarm/<nodeId>`) yang disimpan di
+                    # `node.esp32.mqttTopic`. Ini supaya hanya ESP32 di sektor terkait
+                    # yang berbunyi — bukan semua unit di lapangan.
                     if self.mqtt_client is not None:
-                        msg = json.dumps({"event": "apd_violation", "violations": violation_names, "camera_source": camera_source})
-                        enc_msg = self.encrypt_aes128(msg)
-                        if enc_msg:
-                            self.mqtt_client.publish(MQTT_TOPIC_VIOLATION, enc_msg, qos=1)
+                        esp32_cfg = node.get("esp32") or {}
+                        mqtt_topic = (esp32_cfg.get("mqttTopic") or "").strip()
+                        esp32_enabled = esp32_cfg.get("enabled", True)
+
+                        if not mqtt_topic or not esp32_enabled:
+                            # Skip MQTT publish (ESP32 disabled / topic kosong) tapi
+                            # log + WA tetap jalan supaya operator masih dapat alert.
+                            logger.info(
+                                f"[{sektor_name}] Skip MQTT publish — "
+                                f"esp32.enabled={esp32_enabled}, mqttTopic={'<empty>' if not mqtt_topic else mqtt_topic!r}"
+                            )
+                        else:
+                            payload = {
+                                "event": "apd_violation",
+                                "nodeId": node_id,
+                                "sektorId": node.get("sektorId"),
+                                "violations": violation_names,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+                            enc_msg = self.encrypt_aes128(json.dumps(payload))
+                            if enc_msg:
+                                self.mqtt_client.publish(mqtt_topic, enc_msg, qos=1)
+                                logger.debug(
+                                    f"[{sektor_name}] MQTT publish ke {mqtt_topic} "
+                                    f"(nodeId={node_id}, violations={violation_names})"
+                                )
 
                     # Kirim WA jika cooldown selesai
                     if (current_time - last_wa_notification_time) > WA_COOLDOWN_SECONDS:
@@ -604,8 +892,10 @@ class APDDetectionService:
         # Only start enabled nodes
         nodes = [n for n in nodes if n.get("enabled", True)]
         if not nodes:
-            logger.warning("Tidak ada Node aktif terdaftar di db.json. Menjalankan fallback webcam 0.")
-            nodes = [{"sektorName": "Default Webcam", "cameraSource": "0"}]
+            logger.warning(
+                "Tidak ada node aktif terdaftar. WebSocket tetap aktif, "
+                "tetapi tidak ada kamera yang dijalankan sampai node ditambahkan."
+            )
 
         logger.info(f"Mempersiapkan {len(nodes)} kamera/node untuk dimonitoring...")
         for node in nodes:
