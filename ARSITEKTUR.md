@@ -173,3 +173,22 @@ Panduan lengkap deployment ada di `web-dashboard/README.md`.
 ## 10. Visualisasi Interaktif
 
 Buka `arsitektur-visual/index.html` di browser untuk melihat diagram interaktif, animasi alur permintaan, dan penjelasan tiap komponen secara visual.
+
+---
+
+## Pemetaan Mata Kuliah → File & Kode
+
+Tabel berikut memetakan setiap topik mata kuliah ke file dan fungsi spesifik dalam kodebase, memudahkan penelusuran implementasi teknis untuk keperluan penilaian atau tinjauan akademik.
+
+| Mata Kuliah / Fitur | File | Fungsi / Baris | Keterangan |
+|---------------------|------|----------------|------------|
+| Keamanan Jaringan — Argon2id | `web-dashboard/src/lib/auth/argon2.ts` | `hashPassword()`, `verifyPassword()` | Password hashing KDF |
+| Keamanan Jaringan — 2FA TOTP | `web-dashboard/src/lib/auth/totp.ts` | `generateTotpSecret()`, `verifyTotp()` | RFC 6238 TOTP |
+| Keamanan Jaringan — RBAC | `web-dashboard/src/lib/rbac/permission-map.ts` | `PERMISSION_MAP`, `lookupPermission()` | 34 permissions granular |
+| Keamanan Jaringan — AES-128-CBC (Python) | `ServiceAPDBackend.py` | `encrypt_aes128()`, `decrypt_aes128()` | Random IV per pesan |
+| Keamanan Jaringan — AES-128-CBC (ESP32) | `alarm_apd/alarm_apd.ino` | `aesDecrypt()`, `encryptAndPublish()` | mbedtls built-in |
+| Keamanan Jaringan — Cloudflare Tunnel | `web-dashboard/cloudflared/config.yml` + `src/lib/proxy/cloudflare-ips.ts` | `resolveClientIp()` | TLS termination + IP validation |
+| Pengolahan Citra — YOLO inference | `ServiceAPDBackend.py` | `detect_ppe()`, `process_camera_node()` | YOLOv8 + frame skip |
+| IoT & WSN — MQTT TLS + per-node routing | `ServiceAPDBackend.py` | `setup_mqtt()`, `process_camera_node()` | HiveMQ Cloud TLS |
+| IoT & WSN — ESP32 firmware | `alarm_apd/alarm_apd.ino` | `setup()`, `loop()`, `connectMQTT()` | Production firmware |
+| IoT & WSN — Sensor gas MQ-135 | `alarm_apd/alarm_apd.ino` | `sampleGas()`, `handleGasAlert()`, `publishGasTelemetry()` | ADC + moving avg |

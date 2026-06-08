@@ -18,7 +18,8 @@ Proyek ini dikerjakan sebagai Proyek Berbasis Lapangan (PBL) yang menggabungkan 
 8. [Pemulihan Akses](#pemulihan-akses)
 9. [Pengujian](#pengujian)
 10. [Struktur Proyek](#struktur-proyek)
-11. [Pemecahan Masalah](#pemecahan-masalah)
+11. [Perangkat Keras IoT](#perangkat-keras-iot)
+12. [Pemecahan Masalah](#pemecahan-masalah)
 
 ---
 
@@ -312,13 +313,15 @@ Perintah `npm test` menjalankan unit test dan property-based test yang memverifi
 
 ```
 pbl-ppe/
-  ServiceAPDBackend.py        Backend deteksi APD multi-kamera
+  ServiceAPDBackend.py        Backend deteksi APD multi-kamera (aktif)
   config.py                   Konfigurasi terpusat dibaca dari .env
   requirements-local.txt      Dependensi Python untuk lingkungan lokal
   .env.example                Template environment Python
   ARSITEKTUR.md               Penjelasan arsitektur
   arsitektur-visual/          Visualisasi interaktif (HTML/CSS/JS)
-  esp32-alarm/                Firmware ESP32 untuk alarm
+  alarm_apd/                  Firmware ESP32 production (alarm + sensor gas MQ-135)
+  esp32-alarm/                Firmware ESP32 versi lama (referensi)
+  legacy/                     Iterasi Python sebelumnya (tidak aktif, lihat keterangan bawah)
   web-dashboard/
     src/app/                  Halaman dan API route Next.js
     src/lib/auth/             Argon2, password policy, sesi, CSRF, TOTP
@@ -329,6 +332,93 @@ pbl-ppe/
     data/                     Database SQLite dan backup JSON
     cloudflared/config.yml    Konfigurasi Cloudflare Tunnel
 ```
+
+### File Legacy
+
+Folder `legacy/` berisi service Python dari iterasi pengembangan sebelumnya yang sudah **digantikan oleh `ServiceAPDBackend.py`**:
+
+| File | Keterangan |
+|------|------------|
+| `legacy/ServiceAES128.py` | Iterasi v1 — deteksi orang via RTSP, AES static IV, hardcoded credentials |
+| `legacy/ServiceAES128FullBackend.py` | Iterasi v2 — tambah WebSocket proxy, masih pakai AES static IV |
+
+File-file tersebut tidak dipakai dalam sistem yang berjalan. Dipindahkan ke `legacy/` sesuai Requirement 10.1 agar struktur repositori lebih jelas. Lihat `legacy/README.md` untuk penjelasan lengkap perbedaan tiap iterasi.
+
+---
+
+## Perangkat Keras IoT
+
+Node IoT SafeGuard APD menggunakan ESP32 sebagai mikrokontroler utama, dilengkapi amplifier audio I2S, sensor gas, dan indikator visual/audio lokal.
+
+### Komponen yang Dibutuhkan
+
+| Komponen | Jumlah | Estimasi Harga (IDR) |
+|----------|--------|----------------------|
+| ESP32 DevKit v1 (30-pin atau 38-pin) | 1 | ~60.000 |
+| MAX98357A I2S Amplifier | 1 | ~25.000 |
+| Speaker 3W 4Ω | 1 | ~20.000 |
+| Sensor Gas MQ-135 | 1 | ~35.000 |
+| LED merah 5mm + resistor 220Ω | 1 set | ~5.000 |
+| Buzzer piezo pasif | 1 | ~8.000 |
+| Kabel jumper + breadboard | secukupnya | ~10.000 |
+| **Total estimasi** | | **~163.000** |
+
+Harga adalah estimasi eceran di marketplace lokal (Tokopedia/Shopee) per 2024. Harga dapat berbeda tergantung penjual.
+
+### Wiring Diagram
+
+Diagram ringkas koneksi antar komponen utama:
+
+```
+                     ┌──────────────────────────────────┐
+                     │        ESP32 DevKit v1           │
+                     │                                  │
+  MQ-135 AOUT ───────┤ GPIO34  (ADC input-only)         │
+                     │                                  │
+  MAX98357A BCLK ────┤ GPIO26                           │
+  MAX98357A LRC  ────┤ GPIO25                           │
+  MAX98357A DIN  ────┤ GPIO22                           │
+                     │                                  │
+  LED merah (+)─[220Ω]─ GPIO13                          │
+  LED merah (-) ─────┤ GND                              │
+                     │                                  │
+  Buzzer (+) ────────┤ GPIO27                           │
+  Buzzer (-) ────────┤ GND                              │
+                     │                                  │
+  3.3V ──────────────┤ 3V3                              │
+  5V   ──────────────┤ VIN / 5V                         │
+  GND  ──────────────┤ GND                              │
+                     └──────────────────────────────────┘
+
+MAX98357A: VIN→5V, GND→GND, BCLK→GPIO26, LRC→GPIO25, DIN→GPIO22
+MQ-135:    VCC→5V, GND→GND, AOUT→GPIO34  (DOUT tidak dipakai)
+LED merah: GPIO13 → [220Ω] → LED(+) → LED(-) → GND
+Buzzer:    GPIO27 → Buzzer(+), Buzzer(-) → GND
+```
+
+Diagram lengkap dengan tabel pin mapping, catatan impedansi, dan keterangan setiap sinyal tersedia di [`alarm_apd/README.md`](alarm_apd/README.md#wiring-diagram).
+
+### Quick Setup ESP32
+
+1. Install Arduino IDE dan tambahkan board ESP32 (`https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`).
+2. Install library yang dibutuhkan via Library Manager: `PubSubClient`, `ArduinoJson`, `ESP8266Audio`.
+3. Edit konstanta konfigurasi di bagian atas `alarm_apd/alarm_apd.ino` (WiFi, MQTT, AES key, node ID).
+4. Upload firmware via Arduino IDE ke ESP32.
+5. Upload file audio MP3 ke SPIFFS: Tools > ESP32 Sketch Data Upload.
+6. Buka Serial Monitor (115200 baud) untuk memverifikasi koneksi WiFi dan MQTT.
+
+Panduan lengkap termasuk cara generate AES key, upload SPIFFS, dan mengganti audio alarm ada di [`alarm_apd/README.md`](alarm_apd/README.md).
+
+### Troubleshooting IoT
+
+| Gejala | Kemungkinan Penyebab | Solusi |
+|--------|---------------------|--------|
+| Audio tidak bunyi / mute | File MP3 belum di-upload ke SPIFFS, atau wiring I2S salah | Upload ulang via Tools > Sketch Data Upload; cek koneksi BCLK (GPIO26), LRC (GPIO25), DIN (GPIO22) ke MAX98357A |
+| MQTT TLS connect timeout | Port 8883 diblokir jaringan, atau root CA kadaluarsa | Tes di jaringan lain; update sertifikat `HIVEMQ_ROOT_CA` di firmware |
+| Sensor gas terus memicu alert | MQ-135 belum warm-up, atau threshold terlalu rendah | Tunggu ±2 menit setelah power-on; naikkan nilai `GAS_THRESHOLD` di firmware (default 2200, range 0–4095) |
+| LED tidak menunjukkan state yang benar | Wiring GPIO13/resistor salah, atau polaritas LED terbalik | Pastikan resistor 220Ω seri antara GPIO13 dan anoda LED; katoda LED ke GND |
+
+Troubleshooting lengkap per kategori (audio, MQTT, sensor, LED state) tersedia di [`alarm_apd/README.md`](alarm_apd/README.md#troubleshooting).
 
 ---
 

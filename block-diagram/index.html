@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Block Diagram — SafeGuard APD</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #fff;
+      font-family: 'Times New Roman', 'Serif', Georgia, serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px 20px 40px;
+    }
+
+    h1 {
+      font-size: 16pt;
+      font-weight: bold;
+      color: #000;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    .subtitle {
+      font-size: 10pt;
+      color: #333;
+      margin-bottom: 30px;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .canvas {
+      position: relative;
+      width: 1050px;
+      height: 750px;
+    }
+
+    /* ===== BOX STYLES ===== */
+    .box {
+      position: absolute;
+      border: 2px solid #000;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 10pt;
+      font-weight: bold;
+      color: #000;
+      line-height: 1.3;
+      padding: 6px 10px;
+      z-index: 5;
+    }
+
+    .box .sub {
+      display: block;
+      font-size: 8pt;
+      font-weight: normal;
+      color: #444;
+      margin-top: 2px;
+    }
+
+    /* ===== GROUP / DASHED BORDER ===== */
+    .group {
+      position: absolute;
+      border: 1.5px dashed #555;
+      z-index: 1;
+    }
+
+    .group-label {
+      position: absolute;
+      font-size: 9pt;
+      font-weight: bold;
+      color: #333;
+      background: #fff;
+      padding: 0 6px;
+      z-index: 2;
+    }
+
+    /* ===== SVG ARROWS ===== */
+    svg.arrows {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    svg.arrows line, svg.arrows polyline, svg.arrows path {
+      stroke: #000;
+      stroke-width: 1.5;
+      fill: none;
+    }
+
+    svg.arrows .dashed {
+      stroke-dasharray: 6,4;
+    }
+
+    /* ===== ARROW LABEL ===== */
+    .alabel {
+      position: absolute;
+      font-size: 7.5pt;
+      color: #000;
+      background: #fff;
+      padding: 0 3px;
+      z-index: 6;
+      white-space: nowrap;
+      font-style: italic;
+    }
+
+    /* ===== FIGURE CAPTION ===== */
+    .caption {
+      margin-top: 18px;
+      font-size: 10pt;
+      color: #000;
+      text-align: center;
+    }
+    .caption b { font-weight: bold; }
+
+    /* === Specific box sizes === */
+    .b-cam1    { width: 120px; height: 44px; top: 52px;  left: 60px; }
+    .b-cam2    { width: 120px; height: 44px; top: 108px; left: 60px; }
+    .b-camn    { width: 120px; height: 44px; top: 164px; left: 60px; }
+
+    .b-switch  { width: 130px; height: 50px; top: 100px; left: 280px; }
+    .b-mikrotik{ width: 140px; height: 50px; top: 100px; left: 480px; }
+    .b-ap      { width: 120px; height: 44px; top: 12px;  left: 490px; }
+
+    .b-server  { width: 160px; height: 50px; top: 100px; left: 720px; }
+
+    .b-python  { width: 170px; height: 56px; top: 270px; left: 55px; }
+    .b-nextjs  { width: 170px; height: 56px; top: 270px; left: 730px; }
+    .b-sqlite  { width: 130px; height: 44px; top: 380px; left: 750px; }
+
+    .b-yolo    { width: 140px; height: 44px; top: 380px; left: 70px; }
+
+    .b-mqtt    { width: 140px; height: 50px; top: 500px; left: 30px; }
+    .b-gowa    { width: 140px; height: 50px; top: 500px; left: 240px; }
+    .b-ws      { width: 140px; height: 50px; top: 500px; left: 450px; }
+
+    .b-esp32   { width: 130px; height: 44px; top: 630px; left: 35px; }
+    .b-wa      { width: 130px; height: 44px; top: 630px; left: 245px; }
+    .b-livemon { width: 140px; height: 44px; top: 630px; left: 450px; }
+
+    .b-cftunnel{ width: 150px; height: 50px; top: 380px; left: 530px; }
+    .b-internet{ width: 120px; height: 44px; top: 500px; left: 680px; }
+    .b-browser { width: 130px; height: 44px; top: 630px; left: 665px; }
+    .b-domain  { width: 140px; height: 38px; top: 504px; left: 870px; border-style: dashed; border-color: #555; }
+
+    /* ===== GROUPS ===== */
+    .grp-network {
+      top: 0px; left: 40px; width: 600px; height: 222px;
+    }
+    .grp-server {
+      top: 0px; left: 700px; width: 200px; height: 222px;
+    }
+    .grp-processing {
+      top: 248px; left: 30px; width: 890px; height: 194px;
+    }
+    .grp-output {
+      top: 478px; left: 10px; width: 610px; height: 210px;
+    }
+    .grp-online {
+      top: 358px; left: 510px; width: 210px; height: 210px;
+    }
+
+    .lbl-network   { top: -10px; left: 200px; }
+    .lbl-server    { top: -10px; left: 40px; }
+    .lbl-processing{ top: 238px; left: 370px; }
+    .lbl-output    { top: 468px; left: 230px; }
+    .lbl-online    { top: 348px; left: 545px; }
+
+    /* dots for camera N */
+    .dots {
+      position: absolute;
+      top: 150px; left: 110px;
+      font-size: 16pt;
+      font-weight: bold;
+      color: #000;
+      letter-spacing: 3px;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Block Diagram Sistem SafeGuard APD</h1>
+  <p class="subtitle">Sistem Deteksi Pelanggaran Alat Pelindung Diri Berbasis Computer Vision, IoT & Keamanan Jaringan</p>
+
+  <div class="canvas">
+
+    <!-- ========== GROUPS ========== -->
+    <div class="group grp-network"></div>
+    <span class="group-label lbl-network">Jaringan Lokal</span>
+
+    <div class="group grp-server"></div>
+    <span class="group-label lbl-server">Server</span>
+
+    <div class="group grp-processing"></div>
+    <span class="group-label lbl-processing">Aplikasi di Server</span>
+
+    <div class="group grp-output"></div>
+    <span class="group-label lbl-output">Kanal Notifikasi &amp; Output</span>
+
+    <div class="group grp-online"></div>
+    <span class="group-label lbl-online">Akses Online</span>
+
+    <!-- ========== BOXES ========== -->
+
+    <!-- Network Layer -->
+    <div class="box b-cam1">IP Camera 1<span class="sub">RTSP</span></div>
+    <div class="box b-cam2">IP Camera 2<span class="sub">RTSP</span></div>
+    <div class="box b-camn">IP Camera N<span class="sub">RTSP</span></div>
+    <span class="dots">⋮</span>
+
+    <div class="box b-switch">Hub / Switch</div>
+    <div class="box b-mikrotik">MikroTik Router</div>
+    <div class="box b-ap">Access Point<span class="sub">WiFi</span></div>
+
+    <!-- Server -->
+    <div class="box b-server">Server (Laptop)<span class="sub">GPU / CPU</span></div>
+
+    <!-- Processing -->
+    <div class="box b-python">Python Backend<span class="sub">Deteksi &amp; Notifikasi</span></div>
+    <div class="box b-nextjs">Next.js Dashboard<span class="sub">Auth, RBAC, API, UI</span></div>
+    <div class="box b-yolo">YOLOv8 Model<span class="sub">Deteksi Helm &amp; Rompi</span></div>
+    <div class="box b-sqlite">SQLite<span class="sub">Database</span></div>
+
+    <!-- Output -->
+    <div class="box b-mqtt">MQTT Broker<span class="sub">HiveMQ Cloud (TLS)</span></div>
+    <div class="box b-gowa">GoWA Gateway<span class="sub">WhatsApp API (VPS)</span></div>
+    <div class="box b-ws">WebSocket Server<span class="sub">Port 8765</span></div>
+
+    <div class="box b-esp32">ESP32<span class="sub">Buzzer &amp; LED</span></div>
+    <div class="box b-wa">WhatsApp PIC<span class="sub">Notifikasi &amp; Foto</span></div>
+    <div class="box b-livemon">Live Monitor<span class="sub">Streaming Video</span></div>
+
+    <!-- Online access -->
+    <div class="box b-cftunnel">Cloudflare Tunnel<span class="sub">cloudflared</span></div>
+    <div class="box b-internet">Internet<span class="sub">HTTPS</span></div>
+    <div class="box b-browser">Browser / User<span class="sub">Remote Access</span></div>
+    <div class="box b-domain">Domain<span class="sub">*.example.com</span></div>
+
+    <!-- ========== SVG ARROWS ========== -->
+    <svg class="arrows" viewBox="0 0 1050 750">
+      <defs>
+        <marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#000"/>
+        </marker>
+        <marker id="ah-rev" markerWidth="8" markerHeight="6" refX="0" refY="3" orient="auto">
+          <polygon points="8 0, 0 3, 8 6" fill="#000"/>
+        </marker>
+      </defs>
+
+      <!-- Cameras → Switch -->
+      <line x1="180" y1="74"  x2="278" y2="115" marker-end="url(#ah)" />
+      <line x1="180" y1="125" x2="278" y2="125" marker-end="url(#ah)" />
+      <line x1="180" y1="186" x2="278" y2="140" marker-end="url(#ah)" />
+
+      <!-- Switch → MikroTik -->
+      <line x1="410" y1="125" x2="478" y2="125" marker-end="url(#ah)" />
+
+      <!-- MikroTik → AP (up) -->
+      <line x1="550" y1="100" x2="550" y2="58" marker-end="url(#ah)" />
+
+      <!-- MikroTik → Server -->
+      <line x1="620" y1="125" x2="718" y2="125" marker-end="url(#ah)" />
+
+      <!-- AP ~~~ ESP32 (wireless, dashed down-left to esp32 area) -->
+      <!-- We'll show this conceptually: AP broadcasts, ESP32 receives -->
+      <!-- Drawn as a dashed line from AP down to the ESP32 box area -->
+      <path d="M 540 56 Q 300 56 100 500 Q 85 560 100 628" class="dashed" marker-end="url(#ah)" />
+
+      <!-- Server → Python -->
+      <line x1="760" y1="150" x2="200" y2="270" marker-end="url(#ah)" class="dashed" />
+      <!-- Server → Next.js -->
+      <line x1="800" y1="150" x2="815" y2="268" marker-end="url(#ah)" class="dashed" />
+
+      <!-- Python → YOLO (down) -->
+      <line x1="140" y1="326" x2="140" y2="378" marker-end="url(#ah)" />
+
+      <!-- Python → Next.js (horizontal, report violations) -->
+      <line x1="225" y1="294" x2="728" y2="294" marker-end="url(#ah)" />
+
+      <!-- Next.js → Python (dashed, return node list) -->
+      <line x1="728" y1="308" x2="225" y2="308" marker-end="url(#ah)" class="dashed" />
+
+      <!-- Next.js → SQLite -->
+      <line x1="815" y1="326" x2="815" y2="378" marker-end="url(#ah)" />
+
+      <!-- Python → MQTT -->
+      <line x1="100" y1="326" x2="100" y2="498" marker-end="url(#ah)" />
+
+      <!-- Python → GoWA -->
+      <line x1="170" y1="326" x2="300" y2="498" marker-end="url(#ah)" />
+
+      <!-- Python → WebSocket -->
+      <path d="M 225 310 Q 350 440 510 498" marker-end="url(#ah)" />
+
+      <!-- MQTT → ESP32 -->
+      <line x1="100" y1="550" x2="100" y2="628" marker-end="url(#ah)" />
+
+      <!-- GoWA → WhatsApp -->
+      <line x1="310" y1="550" x2="310" y2="628" marker-end="url(#ah)" />
+
+      <!-- WebSocket → Live Monitor -->
+      <line x1="520" y1="550" x2="520" y2="628" marker-end="url(#ah)" />
+
+      <!-- Next.js → CF Tunnel -->
+      <line x1="730" y1="310" x2="632" y2="378" marker-end="url(#ah)" />
+
+      <!-- CF Tunnel → Internet -->
+      <line x1="620" y1="430" x2="720" y2="498" marker-end="url(#ah)" />
+
+      <!-- Internet → Browser -->
+      <line x1="740" y1="544" x2="730" y2="628" marker-end="url(#ah)" />
+
+      <!-- Internet - Domain (side) -->
+      <line x1="800" y1="522" x2="868" y2="522" marker-end="url(#ah)" class="dashed" />
+
+    </svg>
+
+    <!-- ========== ARROW LABELS ========== -->
+    <span class="alabel" style="top:86px; left:188px;">Ethernet</span>
+    <span class="alabel" style="top:108px; left:418px;">Ethernet</span>
+    <span class="alabel" style="top:72px; left:555px;">WiFi</span>
+    <span class="alabel" style="top:108px; left:638px;">Ethernet</span>
+
+    <span class="alabel" style="top:280px; left:410px;">POST /api/violations</span>
+    <span class="alabel" style="top:310px; left:410px; color:#666;">GET /api/nodes</span>
+
+    <span class="alabel" style="top:344px; left:148px;">Inferensi</span>
+    <span class="alabel" style="top:344px; left:820px;">Prisma ORM</span>
+
+    <span class="alabel" style="top:408px; left:32px;">AES-128-CBC</span>
+    <span class="alabel" style="top:408px; left:188px;">HTTP + Foto</span>
+    <span class="alabel" style="top:430px; left:350px;">Frame JPEG</span>
+
+    <span class="alabel" style="top:582px; left:40px;">Subscribe</span>
+    <span class="alabel" style="top:582px; left:256px;">Kirim Pesan</span>
+    <span class="alabel" style="top:582px; left:468px;">Stream</span>
+
+    <span class="alabel" style="top:340px; left:650px;">HTTPS</span>
+    <span class="alabel" style="top:458px; left:680px;">TLS</span>
+    <span class="alabel" style="top:582px; left:744px;">HTTPS</span>
+    <span class="alabel" style="top:490px; left:820px;">DNS</span>
+
+    <span class="alabel" style="top:340px; left:180px; color:#666; font-size:7pt;">WiFi (MQTT)</span>
+
+  </div>
+
+  <p class="caption"><b>Gambar 1.</b> Block Diagram Arsitektur Sistem SafeGuard APD</p>
+
+</body>
+</html>
