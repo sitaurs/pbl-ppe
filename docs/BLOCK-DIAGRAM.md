@@ -41,7 +41,7 @@ flowchart LR
 
     subgraph PROCESSING["PROCESSING"]
         P1["Backend Python<br/>YOLOv8 + MQTT Publisher"]
-        P2["Web Dashboard Next.js<br/>RBAC + 2FA + Audit Log"]
+        P2["Web Dashboard Next.js<br/>RBAC + 2FA + Audit Log<br/>+ Cloudflare Tunnel"]
         P3["ESP32 Firmware<br/>AES-Decrypt + Audio I2S"]
         P4[("SQLite Database<br/>(internal storage)")]
     end
@@ -50,24 +50,24 @@ flowchart LR
         O1["Alarm Speaker<br/>(MAX98357A)"]
         O2["LED Indikator<br/>(merah / status)"]
         O3["WhatsApp PIC<br/>(via GoWA)"]
-        O4["Live Dashboard<br/>(real-time pelanggaran)"]
-        O5["Cloudflare Tunnel<br/>(HTTPS public access)"]
+        O4["Live Dashboard<br/>(lokal + online via CF Tunnel)"]
     end
 
     %% Input -> Processing
     IN1 --> P1
     IN2 --> P3
-    IN3 --> O5
     IN4 --> P3
+    IN3 --> P2
 
-    %% Processing internal: Python <-> Dashboard (bidirectional)
-    P1 -->|fetch nodes / lapor pelanggaran| P2
+    %% Python <-> Dashboard (bidirectional HTTP)
+    P1 -->|fetch nodes + lapor pelanggaran| P2
     P2 -->|daftar node + 200 OK| P1
 
-    %% Dashboard <-> Database (bidirectional read/write)
-    P2 <--> P4
+    %% Dashboard <-> Database (bidirectional: write violation/audit, read data)
+    P2 -->|write: violation, audit, telemetri| P4
+    P4 -->|read: nodes, users, roles| P2
 
-    %% Python <-> ESP32 (publish alarm + telemetri gas via MQTT)
+    %% Python <-> ESP32 via MQTT
     P1 -->|publish alarm AES| P3
     P3 -->|publish telemetri gas| P1
 
@@ -76,11 +76,10 @@ flowchart LR
     P3 --> O1
     P3 --> O2
     P2 --> O4
-    P2 --> O5
-    O5 --> P2
 
     classDef whiteBox fill:#ffffff,stroke:#000000,stroke-width:2px,color:#000000;
-    class IN1,IN2,IN3,IN4,P1,P2,P3,P4,O1,O2,O3,O4,O5 whiteBox;
+    class IN1,IN2,IN3,IN4,P1,P2,P3,O1,O2,O3,O4 whiteBox;
+    class P4 whiteBox;
 
     style INPUT fill:#000000,stroke:#000000,color:#ffffff
     style PROCESSING fill:#000000,stroke:#000000,color:#ffffff
