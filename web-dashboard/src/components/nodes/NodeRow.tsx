@@ -5,6 +5,7 @@ import { Pencil, Copy, Power, Trash2, ChevronRight } from 'lucide-react';
 import HealthScoreIndicator from './HealthScoreIndicator';
 import CompositionIcon from './CompositionIcon';
 import NodeTreeView, { deriveComposition } from './NodeTreeView';
+import GasAlertBadge from './GasAlertBadge';
 import { PermissionGate } from '@/components/access/PermissionGate';
 import {
   NodeData,
@@ -166,11 +167,15 @@ export default function NodeRow({
 
         {/* Sector Name */}
         <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
-          <div>
+          <div className="flex items-center flex-wrap gap-y-1">
             <span className="text-xs font-bold px-2 py-0.5 rounded mr-2" style={{ background: 'var(--accent)', color: 'white' }}>
               {node.sektorId}
             </span>
             {node.sektorName}
+            {/* Gas alert badge — hanya tampil jika node punya ESP32 dengan gas sensor aktif (Req 8.6) */}
+            {node.esp32?.gasSensorEnabled === true && (
+              <GasAlertBadge nodeId={node.id} />
+            )}
           </div>
         </td>
 

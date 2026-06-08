@@ -37,6 +37,8 @@ describe('StepReview data display logic', () => {
       mqttBroker: 'broker.hivemq.com',
       mqttTopic: 'APD_Violation',
       skipped: false,
+      gasSensorEnabled: false,
+      gasThreshold: 2200,
       ...overrides,
     };
   }

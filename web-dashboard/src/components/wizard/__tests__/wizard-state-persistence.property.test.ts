@@ -31,6 +31,8 @@ const esp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.record({
   mqttBroker: fc.string({ minLength: 1, maxLength: 50 }),
   mqttTopic: fc.string({ minLength: 1, maxLength: 50 }),
   skipped: fc.constant(false),
+  gasSensorEnabled: fc.boolean(),
+  gasThreshold: fc.integer({ min: 0, max: 4095 }),
 });
 
 /** Generate a valid step index (0-3) */
@@ -55,7 +57,7 @@ function createInitialState(): WizardState {
       detectionMode: '',
       skipped: false,
     },
-    esp32Config: { mqttBroker: '', mqttTopic: '', skipped: false },
+    esp32Config: { mqttBroker: '', mqttTopic: '', skipped: false, gasSensorEnabled: false, gasThreshold: 2200 },
     completedSteps: new Set<number>(),
     skippedSteps: new Set<number>(),
     dirty: false,

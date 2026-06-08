@@ -8,6 +8,8 @@ export interface StepESP32ConfigValues {
   mqttBroker: string;
   mqttTopic: string;
   skipped: boolean;
+  gasSensorEnabled: boolean;
+  gasThreshold: number;
 }
 
 export interface StepESP32ConfigProps {
@@ -97,12 +99,34 @@ export default function StepESP32Config({ values, onChange, onTestMqtt }: StepES
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const skipped = e.target.checked;
       if (skipped) {
-        onChange({ mqttBroker: '', mqttTopic: '', skipped: true });
+        onChange({
+          mqttBroker: '',
+          mqttTopic: '',
+          skipped: true,
+          gasSensorEnabled: false,
+          gasThreshold: 2200,
+        });
       } else {
         onChange({ ...values, skipped: false });
       }
       setTouched({});
       setTestResult(null);
+    },
+    [values, onChange]
+  );
+
+  const handleGasSensorToggle = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      onChange({ ...values, gasSensorEnabled: e.target.checked });
+    },
+    [values, onChange]
+  );
+
+  const handleGasThresholdChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const raw = parseInt(e.target.value, 10);
+      const clamped = Math.max(0, Math.min(4095, isNaN(raw) ? 2200 : raw));
+      onChange({ ...values, gasThreshold: clamped });
     },
     [values, onChange]
   );
@@ -294,6 +318,69 @@ export default function StepESP32Config({ values, onChange, onTestMqtt }: StepES
               >
                 {testResult.message}
               </p>
+            )}
+          </div>
+
+          {/* Gas Sensor Section */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: 16 }}>
+            {/* Sensor MQ-135 Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                id="wizard-gas-sensor-enabled"
+                type="checkbox"
+                checked={values.gasSensorEnabled}
+                onChange={handleGasSensorToggle}
+                style={{ width: 18, height: 18, cursor: 'pointer' }}
+              />
+              <label
+                htmlFor="wizard-gas-sensor-enabled"
+                style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', cursor: 'pointer' }}
+              >
+                Sensor MQ-135
+              </label>
+            </div>
+
+            {/* Gas Threshold Slider — only visible when gas sensor is enabled */}
+            {values.gasSensorEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label
+                    htmlFor="wizard-gas-threshold"
+                    style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}
+                  >
+                    Threshold Gas (ADC)
+                  </label>
+                  <span
+                    style={{
+                      fontSize: '0.875rem',
+                      fontWeight: 600,
+                      color: 'var(--text-primary)',
+                      minWidth: 48,
+                      textAlign: 'right',
+                    }}
+                  >
+                    {values.gasThreshold}
+                  </span>
+                </div>
+                <input
+                  id="wizard-gas-threshold"
+                  type="range"
+                  min={0}
+                  max={4095}
+                  step={1}
+                  value={values.gasThreshold}
+                  onChange={handleGasThresholdChange}
+                  style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--primary, #3b82f6)' }}
+                  aria-valuemin={0}
+                  aria-valuemax={4095}
+                  aria-valuenow={values.gasThreshold}
+                  aria-label="Gas sensor alert threshold (ADC 0–4095)"
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <span>0</span>
+                  <span>4095</span>
+                </div>
+              </div>
             )}
           </div>
         </>

@@ -14,6 +14,8 @@ export interface ESP32Config {
   mqttTopic: string; // max 128 chars
   mqttBroker: string; // max 256 chars
   enabled: boolean;
+  gasSensorEnabled?: boolean; // Requirement 8.1: optional gas sensor toggle
+  gasThreshold?: number;      // Requirement 8.1: ppm threshold for gas alert
 }
 
 export interface DetectionConfig {

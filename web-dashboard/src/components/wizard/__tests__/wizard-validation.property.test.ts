@@ -55,9 +55,9 @@ const skippedCameraConfigArb: fc.Arbitrary<StepCameraConfigValues> = fc.constant
 
 // Invalid camera config (not skipped): at least one field invalid
 const invalidCameraConfigArb: fc.Arbitrary<StepCameraConfigValues> = fc.oneof(
-  // Missing rtspUrl
+  // Missing/invalid rtspUrl (empty, whitespace, or unsupported protocol)
   fc.record({
-    rtspUrl: fc.constantFrom('', '  ', 'http://notrtsp.com', 'ftp://wrong'),
+    rtspUrl: fc.constantFrom('', '  ', 'ftp://wrong', 'ws://invalid'),
     resolution: fc.constantFrom('640x480', '1280x720'),
     confidenceThreshold: fc.double({ min: 0.01, max: 1.0, noNaN: true }).map((n) => n.toFixed(2)),
     detectionMode: fc.constantFrom('CPU', 'GPU'),
@@ -100,6 +100,8 @@ const validEsp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.record({
   mqttBroker: fc.string({ minLength: 1, maxLength: 256 }).filter((s) => s.trim().length > 0),
   mqttTopic: fc.string({ minLength: 1, maxLength: 128 }).filter((s) => s.trim().length > 0),
   skipped: fc.constant(false),
+  gasSensorEnabled: fc.boolean(),
+  gasThreshold: fc.integer({ min: 0, max: 4095 }),
 });
 
 // Skipped ESP32 config
@@ -107,6 +109,8 @@ const skippedEsp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.constant({
   mqttBroker: '',
   mqttTopic: '',
   skipped: true,
+  gasSensorEnabled: false,
+  gasThreshold: 2200,
 });
 
 // Invalid ESP32 config (not skipped): broker or topic empty
@@ -116,12 +120,16 @@ const invalidEsp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.oneof(
     mqttBroker: fc.constantFrom('', '   ', '\t'),
     mqttTopic: fc.string({ minLength: 1, maxLength: 128 }).filter((s) => s.trim().length > 0),
     skipped: fc.constant(false),
+    gasSensorEnabled: fc.boolean(),
+    gasThreshold: fc.integer({ min: 0, max: 4095 }),
   }),
   // Empty topic
   fc.record({
     mqttBroker: fc.string({ minLength: 1, maxLength: 256 }).filter((s) => s.trim().length > 0),
     mqttTopic: fc.constantFrom('', '   ', '\t'),
     skipped: fc.constant(false),
+    gasSensorEnabled: fc.boolean(),
+    gasThreshold: fc.integer({ min: 0, max: 4095 }),
   })
 );
 
@@ -308,7 +316,7 @@ describe('Property 4: Wizard step validation rules', () => {
           const state = buildWizardState(
             sectorInfo,
             { rtspUrl: '', resolution: '', confidenceThreshold: '', detectionMode: '', skipped: true },
-            { mqttBroker: '', mqttTopic: '', skipped: true }
+            { mqttBroker: '', mqttTopic: '', skipped: true, gasSensorEnabled: false, gasThreshold: 2200 }
           );
           const error = validateAtLeastOneComponent(state);
           expect(error).not.toBeNull();

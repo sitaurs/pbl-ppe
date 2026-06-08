@@ -314,8 +314,17 @@ export default function NodeTreeView({
               label="Topic"
               value={node.esp32.mqttTopic || '—'}
               level={2}
-              isLast={!showTestMqtt}
+              isLast={!node.esp32.gasSensorEnabled && !showTestMqtt}
             />
+            {/* Gas sensor info — tampil jika gasSensorEnabled aktif (Req 8.6) */}
+            {node.esp32.gasSensorEnabled && (
+              <TreeItem
+                label="Sensor Gas (MQ-135)"
+                value={`Aktif — threshold ${node.esp32.gasThreshold ?? 2200}`}
+                level={2}
+                isLast={!showTestMqtt}
+              />
+            )}
             {/* Quick Action for MQTT */}
             {showTestMqtt && (
               <div className="node-tree-quick-actions" role="group" aria-label="Aksi ESP32">

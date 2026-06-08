@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Server, AlertTriangle, ShieldCheck, Activity, Camera, Clock } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
+import { getYoloWebSocketUrl } from '@/lib/ws-url';
 
 interface NodeData {
   id: number;
@@ -83,8 +84,7 @@ export default function DashboardPage() {
 
     const connect = () => {
       try {
-        const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-        ws = new WebSocket(`ws://${wsHost}:8765`);
+        ws = new WebSocket(getYoloWebSocketUrl());
         ws.onopen = () => setWsConnected(true);
         ws.onclose = () => {
           setWsConnected(false);

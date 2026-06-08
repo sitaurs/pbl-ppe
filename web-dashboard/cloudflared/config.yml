@@ -1,29 +1,45 @@
 # cloudflared/config.yml
 # Cloudflare Tunnel (named tunnel) configuration for SafeGuard APD.
-# Sesuai design.md §Cloudflare Tunnel Deployment dan Req 15.2.
+# Sesuai design.md §8 — Cloudflare Tunnel Setup dan Requirements 7.1, 7.2.
 #
-# Catatan deployment:
-#  1. Replace <tunnel-uuid> dengan UUID hasil `cloudflared tunnel create safeguard-apd`.
-#  2. Replace <USER> dengan username Windows host.
-#  3. Setelah tunnel created, jalankan:
-#       cloudflared tunnel route dns safeguard-apd safeguard.<your-domain>
-#       cloudflared tunnel route dns safeguard-apd ws.safeguard.<your-domain>
-#  4. Install sebagai service Windows agar auto-start:
-#       cloudflared service install
-#       Start-Service cloudflared
-#  5. Verifikasi: kunjungi https://safeguard.<your-domain> di browser.
+# STATUS: PENDING — Placeholder belum diganti dengan nilai aktual.
 #
-# Mode: named tunnel (BUKAN WARP, BUKAN Cloudflare Access). Auth tetap
-# dilakukan oleh aplikasi via session cookie + RBAC.
+# CARA TERCEPAT: Jalankan setup-tunnel.ps1 dari folder ini untuk mengisi
+# config.yml secara otomatis sekaligus setup DNS + .env.local:
 #
-# Arsitektur 2 hostname:
+#   cd web-dashboard\cloudflared
+#   .\setup-tunnel.ps1
+#
+# Script tersebut akan:
+#   1. Login ke Cloudflare (buka browser)
+#   2. Buat tunnel 'safeguard-apd' dan catat UUID-nya
+#   3. Update config.yml ini dengan UUID + username Windows + domain aktual
+#   4. Route DNS untuk safeguard.<domain> dan ws.safeguard.<domain>
+#   5. Update web-dashboard/.env.local dengan BEHIND_PROXY, NEXTAUTH_URL, dll.
+#
+# ── FORMAT YANG DIHARAPKAN SETELAH SETUP (lihat design.md §8.1) ──
+# tunnel: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+# credentials-file: C:\Users\<windows-username>\.cloudflared\a1b2c3d4-...json
+# ─────────────────────────────────────────────────────────────────
+#
+# MANUAL FALLBACK (jika tidak pakai script):
+#   1. cloudflared tunnel login
+#   2. cloudflared tunnel create safeguard-apd
+#      → catat UUID dari output
+#   3. Edit file ini:
+#      - <tunnel-uuid>          → UUID (contoh: a1b2c3d4-e5f6-7890-abcd-ef1234567890)
+#      - <USER>                 → username Windows (contoh: budi)
+#      - safeguard.example.com  → hostname domain aktual
+#   4. cloudflared tunnel route dns safeguard-apd safeguard.<domain>
+#      cloudflared tunnel route dns safeguard-apd ws.safeguard.<domain>
+#   Lihat SETUP.md di folder ini untuk panduan lengkap.
+#
+# Arsitektur 2 hostname (design.md §8.1):
 #  - safeguard.<domain>     → Next.js port 3000 (UI + API + auth)
 #  - ws.safeguard.<domain>  → Python YOLO port 8765 (WebSocket frame stream)
-#
-# Halaman /monitor di browser akan connect WebSocket ke ws.safeguard.<domain>.
-# Update env NEXT_PUBLIC_YOLO_WS_URL di web-dashboard/.env.local sesuai hostname.
 # WebSocket pass-through aktif by default sejak cloudflared >= 2024.
 
+# === GANTI NILAI DI BAWAH INI ===
 tunnel: <tunnel-uuid>
 credentials-file: C:\Users\<USER>\.cloudflared\<tunnel-uuid>.json
 

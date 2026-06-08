@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Monitor, X, AlertTriangle, Maximize2, Camera, Clock, Shield, WifiOff } from 'lucide-react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { Monitor, X, AlertTriangle, Camera, Clock, Shield, WifiOff } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
+import { getYoloWebSocketUrl } from '@/lib/ws-url';
 
 interface CameraFrame {
   sector_id: string;
@@ -17,24 +18,30 @@ export default function MonitorPage() {
   const [wsConnected, setWsConnected] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [violationCounts, setViolationCounts] = useState<Record<string, number>>({});
+  const [nodeCount, setNodeCount] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const framesBuffer = useRef<Record<string, CameraFrame>>({});
+  const connectRef = useRef<() => void>(() => { /* placeholder */ });
 
-  useEffect(() => {
-    connectWebSocket();
-    const renderInterval = setInterval(() => {
-      setFrames({ ...framesBuffer.current });
-    }, 150);
-    return () => { clearInterval(renderInterval); wsRef.current?.close(); };
+  const fetchNodeCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/nodes');
+      if (!res.ok) return;
+      const data = await res.json() as Array<{ enabled?: boolean }> | { nodes?: Array<{ enabled?: boolean }> };
+      const nodes = Array.isArray(data) ? data : (data.nodes ?? []);
+      setNodeCount(nodes.filter((node) => node.enabled !== false).length);
+    } catch {
+      // ignore
+    }
   }, []);
 
-  const connectWebSocket = () => {
+  const connectWebSocket = useCallback(() => {
     try {
-      const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const ws = new WebSocket(`ws://${wsHost}:8765`);
+      const wsUrl = getYoloWebSocketUrl();
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => { setWsConnected(false); setTimeout(connectWebSocket, 3000); };
+      ws.onclose = () => { setWsConnected(false); setTimeout(() => connectRef.current(), 3000); };
       ws.onerror = () => setWsConnected(false);
       ws.onmessage = (event) => {
         try {
@@ -56,7 +63,28 @@ export default function MonitorPage() {
         } catch { /* ignore */ }
       };
     } catch { setWsConnected(false); }
-  };
+  }, []);
+
+  useLayoutEffect(() => {
+    connectRef.current = connectWebSocket;
+  });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    connectWebSocket();
+    void fetchNodeCount();
+    const renderInterval = setInterval(() => {
+      setFrames({ ...framesBuffer.current });
+    }, 150);
+    const nodesInterval = setInterval(() => {
+      void fetchNodeCount();
+    }, 15000);
+    return () => {
+      clearInterval(renderInterval);
+      clearInterval(nodesInterval);
+      wsRef.current?.close();
+    };
+  }, [connectWebSocket, fetchNodeCount]);
 
   const cameraList = Object.values(frames);
   const selectedCam = selected ? frames[selected] : null;
@@ -99,7 +127,13 @@ export default function MonitorPage() {
       {/* Camera Grid */}
       {cameraList.length === 0 ? (
         <div className="card p-12 text-center stagger-item stagger-3">
-          {wsConnected ? (
+          {nodeCount === 0 ? (
+            <>
+              <Monitor size={36} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Belum ada node aktif</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Tambahkan node di Kelola Node untuk mulai menampilkan kamera.</p>
+            </>
+          ) : wsConnected ? (
             <>
               <Monitor size={36} className="mx-auto mb-3 opacity-30" />
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Menunggu frame dari backend...</p>

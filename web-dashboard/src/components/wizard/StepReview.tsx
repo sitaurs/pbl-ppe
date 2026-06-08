@@ -84,6 +84,16 @@ export default function StepReview({
           <>
             <ReviewItem label="MQTT Broker" value={esp32Config.mqttBroker || '—'} />
             <ReviewItem label="MQTT Topic" value={esp32Config.mqttTopic || '—'} />
+            <ReviewItem
+              label="Sensor MQ-135"
+              value={esp32Config.gasSensorEnabled ? 'Aktif' : 'Tidak aktif'}
+            />
+            {esp32Config.gasSensorEnabled && (
+              <ReviewItem
+                label="Threshold Gas (ADC)"
+                value={String(esp32Config.gasThreshold ?? 2200)}
+              />
+            )}
           </>
         )}
       </ReviewCard>

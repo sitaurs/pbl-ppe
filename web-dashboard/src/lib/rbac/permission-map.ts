@@ -99,6 +99,10 @@ export const PERMISSION_MAP: PermissionMapEntry[] = [
   // --- Audit Log --------------------------------------------------------
   { method: "GET",    pathPattern: /^\/api\/audit-log$/,                          permission: "audit-log:read" },
   { method: "GET",    pathPattern: /^\/api\/audit-log\/export$/,                  permission: "audit-log:read" },
+
+  // --- Telemetry --------------------------------------------------------
+  { method: "GET",    pathPattern: /^\/api\/telemetry\/gas$/,                     permission: "node:read",            sectorScoped: true },
+  { method: "POST",   pathPattern: /^\/api\/telemetry\/gas$/,                     permission: "node:update",          serviceTokenAllowed: true },
 ];
 
 /**

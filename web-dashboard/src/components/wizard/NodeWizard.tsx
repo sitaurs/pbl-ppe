@@ -65,6 +65,8 @@ function createInitialState(initialData?: Partial<NodeData>): WizardState {
     mqttBroker: initialData?.esp32?.mqttBroker || '',
     mqttTopic: initialData?.esp32?.mqttTopic || '',
     skipped: initialData?.esp32 === null && initialData !== undefined && 'esp32' in initialData,
+    gasSensorEnabled: initialData?.esp32?.gasSensorEnabled ?? false,
+    gasThreshold: initialData?.esp32?.gasThreshold ?? 2200,
   };
 
   return {
@@ -228,6 +230,8 @@ export function buildNodeDataFromWizardState(
           mqttBroker: state.esp32Config.mqttBroker,
           mqttTopic: state.esp32Config.mqttTopic,
           enabled: true,
+          gasSensorEnabled: state.esp32Config.gasSensorEnabled,
+          gasThreshold: state.esp32Config.gasThreshold,
         },
     detection: state.cameraConfig.skipped
       ? null

@@ -119,6 +119,7 @@ model Node {
   detection     String?                 // JSON-serialized DetectionConfig | null
   sector        Sector   @relation(fields: [sektorId], references: [id])
   violations    Violation[]
+  gasTelemetry  GasTelemetry[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -180,4 +181,18 @@ model RecoveryCode {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model GasTelemetry {
+  id        String   @id @default(uuid())
+  nodeId    Int
+  sektorId  String
+  raw       Int                       // 0..4095
+  alert     Boolean
+  timestamp DateTime @default(now())
+  node      Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, timestamp])
+  @@index([timestamp])
+  @@index([alert, timestamp])
 }

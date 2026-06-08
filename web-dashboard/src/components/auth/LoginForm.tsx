@@ -6,13 +6,12 @@
  * Submit ke /api/auth/login; handle 401, 429, 503; redirect ke `redirect`
  * param atau response.redirect.
  */
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 type Step = "credentials" | "totp";
 
 export function LoginForm({ migrationPending }: { migrationPending?: boolean }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectParam = searchParams?.get("redirect") ?? null;
 
@@ -55,7 +54,10 @@ export function LoginForm({ migrationPending }: { migrationPending?: boolean }) 
           return;
         }
         const target = data.redirect ?? "/";
-        router.push(target);
+        // Use a full navigation so the freshly-set HttpOnly cookie is definitely
+        // included on the next request, even when the dashboard is being
+        // accessed through a tunnel / non-local dev origin.
+        window.location.assign(target);
         return;
       }
       if (res.status === 429) {
@@ -76,66 +78,93 @@ export function LoginForm({ migrationPending }: { migrationPending?: boolean }) 
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 w-full max-w-sm">
-      <h1 className="text-xl font-bold">Masuk SafeGuard APD</h1>
+    <form onSubmit={submit} className="login-form">
+      {/* Hidden h1 for accessibility / SEO */}
+      <h1 className="sr-only">Masuk SafeGuard APD</h1>
+
       {migrationPending && (
-        <div className="bg-yellow-100 border border-yellow-300 p-3 rounded text-sm text-yellow-800">
+        <div className="login-form__alert login-form__alert--warning">
           Migrasi data belum dijalankan. Eksekusi <code>npm run migrate:json-to-db</code> sebelum login.
         </div>
       )}
       {error && (
-        <div role="alert" className="bg-red-100 border border-red-300 p-3 rounded text-sm text-red-800">
+        <div role="alert" className="login-form__alert login-form__alert--error">
           {error}
         </div>
       )}
+
       {step === "credentials" && (
         <>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>Username</span>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              required
-              className="border rounded px-3 py-2"
-            />
+          <label className="login-form__label">
+            <span className="login-form__label-text">Username</span>
+            <div className="login-form__input-wrapper">
+              <svg className="login-form__input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                required
+                placeholder="Masukkan username"
+                className="login-form__input"
+              />
+            </div>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-              className="border rounded px-3 py-2"
-            />
+          <label className="login-form__label">
+            <span className="login-form__label-text">Password</span>
+            <div className="login-form__input-wrapper">
+              <svg className="login-form__input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+                placeholder="Masukkan password"
+                className="login-form__input"
+              />
+            </div>
           </label>
         </>
       )}
+
       {step === "totp" && (
-        <label className="flex flex-col gap-1 text-sm">
-          <span>Kode 2FA (TOTP)</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="\d{6,10}"
-            value={totp}
-            onChange={(e) => setTotp(e.target.value)}
-            autoComplete="one-time-code"
-            required
-            className="border rounded px-3 py-2"
-          />
-          <span className="text-xs text-gray-500">
+        <label className="login-form__label">
+          <span className="login-form__label-text">Kode 2FA (TOTP)</span>
+          <div className="login-form__input-wrapper">
+            <svg className="login-form__input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="\d{6,10}"
+              value={totp}
+              onChange={(e) => setTotp(e.target.value)}
+              autoComplete="one-time-code"
+              required
+              placeholder="000000"
+              className="login-form__input"
+              style={{ textAlign: "center", letterSpacing: "0.2em", fontSize: "1.1rem" }}
+            />
+          </div>
+          <span className="login-form__hint">
             Atau gunakan recovery code 10 karakter.
           </span>
         </label>
       )}
+
       <button
         type="submit"
         disabled={loading || migrationPending}
-        className="bg-orange-500 text-white py-2 rounded disabled:opacity-50"
+        className="login-form__submit"
       >
         {loading ? "Memproses..." : step === "totp" ? "Verifikasi" : "Masuk"}
       </button>

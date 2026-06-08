@@ -38,6 +38,8 @@ const activeEsp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.record({
   mqttBroker: fc.string({ minLength: 1, maxLength: 256 }),
   mqttTopic: fc.string({ minLength: 1, maxLength: 128 }),
   skipped: fc.constant(false),
+  gasSensorEnabled: fc.boolean(),
+  gasThreshold: fc.integer({ min: 0, max: 4095 }),
 });
 
 // ESP32 config that IS skipped
@@ -45,6 +47,8 @@ const skippedEsp32ConfigArb: fc.Arbitrary<StepESP32ConfigValues> = fc.record({
   mqttBroker: fc.string({ minLength: 0, maxLength: 256 }),
   mqttTopic: fc.string({ minLength: 0, maxLength: 128 }),
   skipped: fc.constant(true),
+  gasSensorEnabled: fc.constant(false),
+  gasThreshold: fc.constant(2200),
 });
 
 // Helper to build a WizardState from components
