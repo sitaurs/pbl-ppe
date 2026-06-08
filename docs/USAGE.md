@@ -67,10 +67,11 @@ TUI (file [`tui.py`](../tui.py)) adalah control center untuk semua operasi.
 | Tombol | Tab | Fungsi |
 |---|---|---|
 | `1` | OVERVIEW | Status realtime, readiness check, connections |
-| `2` | LOGS | Live tail log dari Python backend + Next.js |
+| `2` | SERVICES | Status service Next.js + Python + Cloudflare |
 | `3` | SETUP | Setup steps individual (A-I) |
-| `4` | CONFIG | View kontent .env dan .env.local |
-| `5` | HELP | Daftar shortcut keys |
+| `4` | LOGS | Live tail log dari Python backend + Next.js |
+| `5` | CONFIG | View kontent .env dan .env.local |
+| `6` | HELP | Daftar shortcut keys |
 
 ### Operasi Service
 

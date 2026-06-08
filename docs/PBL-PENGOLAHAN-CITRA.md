@@ -179,14 +179,15 @@ Confusion matrix + curve PR/F1 ada di `runs/detect/ppe_training/helmet_vest_v1/`
 
 ## Pemetaan ke File & Kode
 
-| Komponen | File | Baris |
+| Komponen | File | Fungsi |
 |---|---|---|
 | Backend deteksi utama | `ServiceAPDBackend.py` | seluruh file |
 | Logika overlap orang vs APD | `ServiceAPDBackend.py` | `detect_ppe()` |
-| Frame skip | `ServiceAPDBackend.py` | `process_camera_node()` |
+| Frame skip + kamera worker | `ServiceAPDBackend.py` | `process_camera_node()` |
 | Multi-camera threading | `ServiceAPDBackend.py` | `start_camera_threads()` |
 | Model loading + GPU init | `ServiceAPDBackend.py` | `__init__()` |
-| Pipeline encrypt + publish | `ServiceAPDBackend.py` | `process_violation()` |
+| Lapor pelanggaran ke dashboard | `ServiceAPDBackend.py` | `log_violation_to_dashboard()` |
+| Encrypt + publish MQTT | `ServiceAPDBackend.py` | `encrypt_aes128()` + di dalam `process_camera_node()` |
 | Konfigurasi model path | `config.py` | `PPE_MODEL_PATH`, `PERSON_MODEL_PATH` |
 | Training script | `training/2_train_ppe.py` | seluruh file |
 | Dataset prep | `training/3_prepare_chv_dataset.py` | seluruh file |

@@ -41,8 +41,8 @@ Server pusat bisa kirim alarm ke ESP32 spesifik (per-sektor) lewat topic `apd/al
 | MQ-135 Gas Sensor | 1 | ~35.000 | Deteksi gas (CO2, NH3, asap, alkohol) |
 | LED merah 5mm | 1 | ~2.000 | Indikator visual alarm |
 | Resistor 220Ω | 1 | ~1.000 | Current limiter LED |
-| Kabel jumper + breadboard | secukupnya | ~10.000 | Wiring |
-| **Total** | | **~153.000** | per node |
+| Kabel jumper + breadboard | secukupnya | ~20.000 | Wiring + prototyping |
+| **Total per node** | | **~163.000** | |
 
 Untuk PBL kami pakai 1 node demo. Untuk deployment beneran, tinggal duplicate per sektor.
 
@@ -347,24 +347,24 @@ Tekan BOOT → alarm bunyi 1x putaran. Berguna saat:
 
 ### Bagian Penting di `alarm_apd.ino`
 
-| Konsep | Baris (approx) |
+| Konsep | Mulai Line (approx) |
 |---|---|
 | Konstanta + pin map | 33-50 |
 | Root CA cert (Let's Encrypt R13) | 77-110 |
-| `setup()` — init WiFi + NTP + MQTT | 220-260 |
-| `connectMQTT()` — TLS handshake | 295-380 |
-| `mqttCallback()` — terima pesan | 400-460 |
-| `aesDecrypt()` — decrypt AES-128-CBC | 525-590 |
-| `decryptAndParse()` — pipeline lengkap | 615-770 |
-| `setupAudio()` — init I2S MAX98357A | 790-810 |
-| `startAlarm()` — putar audio | 830-880 |
-| `handleAudioLoop()` — pump audio non-blocking | 940-995 |
-| `updateLED()` — state machine LED | 1145-1195 |
-| `checkBootButton()` — tombol test | 1300-1335 |
-| `handleGasAlert()` — sensor gas alert | 1370-1430 |
-| `sampleGas()` — sampling MQ-135 | 1475-1530 |
-| `encryptAndPublish()` — encrypt MQTT | 1560-1670 |
-| `publishGasTelemetry()` — kirim telemetri | 1735-1810 |
+| `setup()` — init WiFi + NTP + MQTT + SPIFFS | 194 |
+| `connectMQTT()` — TLS handshake | 295 |
+| `mqttCallback()` — terima pesan | 406 |
+| `aesDecrypt()` — decrypt AES-128-CBC | 550 |
+| `decryptAndParse()` — pipeline lengkap | 615 |
+| `setupAudio()` — init I2S MAX98357A | 808 |
+| `startAlarm()` — putar audio | 850 |
+| `handleAudioLoop()` — pump audio non-blocking | 967 |
+| `updateLED()` — state machine LED | 1194 |
+| `checkBootButton()` — tombol test | 1325 |
+| `handleGasAlert()` — sensor gas alert | 1381 |
+| `sampleGas()` — sampling MQ-135 | 1505 |
+| `encryptAndPublish()` — encrypt MQTT | 1607 |
+| `publishGasTelemetry()` — kirim telemetri | 1760 |
 
 ---
 
@@ -413,7 +413,7 @@ SPIFFS (file system di flash ESP32) terbatas 4 MB. Cuma cukup 1-2 file MP3 pende
 
 HTTP streaming = file ada di VPS, ESP32 stream chunk-by-chunk. Audio bisa diganti di VPS kapan saja, tidak perlu sentuh ESP32. Trade-off: harus ada koneksi internet saat alarm bunyi.
 
-Fallback: ada `apd_alert.mp3` di SPIFFS sebagai backup kalau HTTP gagal (belum implementasi penuh).
+Catatan: ada `apd_alert.mp3` di SPIFFS sebagai fallback offline. Kode `setup()` mount SPIFFS dan log "[spiffs] OK" saat boot. Tapi pipeline audio sekarang full HTTP stream — fallback SPIFFS tinggal sebagai cadangan kalau di masa depan ingin disable koneksi internet.
 
 ### "Bagaimana kalau ada banyak ESP32 di banyak sektor, MQTT broker tidak overload?"
 

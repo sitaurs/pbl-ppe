@@ -84,9 +84,15 @@ Setelah lockout selesai, user bisa coba lagi (auto-unlock saat password benar).
 
 ### Pelengkap: CSRF Protection
 
-Setiap request POST/PUT/PATCH/DELETE wajib bawa header `X-CSRF-Token` yang cocok dengan session. Tanpa token → 403. Cookie session di-set HttpOnly + Secure + SameSite=Lax.
+Setiap request POST/PUT/PATCH/DELETE wajib bawa header `X-CSRF-Token` yang cocok dengan session. Tanpa token → 403. Cookie session di-set:
 
-**File:** middleware line 254-259
+- `HttpOnly` — selalu (mencegah akses dari JavaScript browser)
+- `SameSite=Lax` — selalu
+- `Secure` — **conditional**: aktif kalau `NODE_ENV=production` ATAU `BEHIND_PROXY=cloudflare`. Di dev local (HTTP localhost), `Secure=false` agar cookie tetap di-set browser.
+
+Ini reasonable — production wajib HTTPS, dev local pakai HTTP.
+
+**File:** [`web-dashboard/src/lib/auth/cookie-attrs.ts`](../web-dashboard/src/lib/auth/cookie-attrs.ts), middleware line 254-259
 
 ### Pelengkap: Audit Log Append-Only
 
@@ -172,8 +178,8 @@ Komunikasi MQTT pakai TLS 1.2+:
 
 **File:**
 - Encrypt Python: [`ServiceAPDBackend.py`](../ServiceAPDBackend.py) `encrypt_aes128()`
-- Decrypt ESP32: [`alarm_apd/alarm_apd.ino`](../alarm_apd/alarm_apd.ino) `aesDecrypt()`
-- TLS verify: [`alarm_apd/alarm_apd.ino`](../alarm_apd/alarm_apd.ino) line 328 `setCACert`
+- Decrypt ESP32: [`alarm_apd/alarm_apd.ino`](../alarm_apd/alarm_apd.ino) `aesDecrypt()` (line 550)
+- TLS verify: [`alarm_apd/alarm_apd.ino`](../alarm_apd/alarm_apd.ino) `setCACert(HIVEMQ_ROOT_CA)` (line 338)
 
 ---
 
@@ -238,7 +244,7 @@ curl -H "Authorization: Bearer <REAL_TOKEN>" http://localhost:3000/api/nodes
 Script otomatis: `powershell -File scripts/test_service_token.ps1`.
 
 **File:**
-- Validator: [`web-dashboard/src/middleware.ts`](../web-dashboard/src/middleware.ts) line 161-184
+- Validator: [`web-dashboard/src/middleware.ts`](../web-dashboard/src/middleware.ts) line 159-185
 - Whitelist registry: [`web-dashboard/src/lib/rbac/permission-map.ts`](../web-dashboard/src/lib/rbac/permission-map.ts)
 - Python sender: [`ServiceAPDBackend.py`](../ServiceAPDBackend.py) `DASHBOARD_HEADERS`
 
@@ -300,7 +306,8 @@ Hasil: audit log mencatat **IP HP/laptop dosen yang asli**, bukan IP Cloudflare.
 **File:**
 - Tunnel config: [`web-dashboard/cloudflared/config.yml`](../web-dashboard/cloudflared/config.yml)
 - Setup script: [`web-dashboard/cloudflared/setup-tunnel.ps1`](../web-dashboard/cloudflared/setup-tunnel.ps1)
-- IP resolver: middleware (whitelist Cloudflare IPs)
+- IP resolver: [`web-dashboard/src/lib/proxy/cloudflare-ips.ts`](../web-dashboard/src/lib/proxy/cloudflare-ips.ts) (`resolveClientIp()` + whitelist Cloudflare IPv4/IPv6 ranges)
+- Middleware integration: [`web-dashboard/src/middleware.ts`](../web-dashboard/src/middleware.ts) line 142-148
 
 ---
 
