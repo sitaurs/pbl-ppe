@@ -96,10 +96,17 @@ GPU_DEVICE_INDEX: int = int(os.getenv("GPU_DEVICE_INDEX", "0"))
 # ============================================================
 # Model Paths
 # ============================================================
-PPE_MODEL_PATH: str = str(
-    BASE_DIR / "runs" / "detect" / "ppe_training" / "helmet_vest_v1" / "weights" / "best.pt"
+# Weights disimpan di models/ (lihat models/README.md untuk cara dapat).
+# PPE_MODEL_PATH di-override jadi runs/.../best.pt jika user habis training
+# (output ultralytics) — fallback ke models/ppe_best.pt yang stable.
+PPE_MODEL_PATH: str = os.getenv(
+    "PPE_MODEL_PATH",
+    str(BASE_DIR / "models" / "ppe_best.pt"),
 )
-PERSON_MODEL_PATH: str = str(BASE_DIR / "yolov8n.pt")
+PERSON_MODEL_PATH: str = os.getenv(
+    "PERSON_MODEL_PATH",
+    str(BASE_DIR / "models" / "yolov8n.pt"),
+)
 
 # ============================================================
 # Dataset

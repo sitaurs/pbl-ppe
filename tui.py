@@ -115,6 +115,8 @@ class S:
     cf_tunnel_url  = ""               # Quick tunnel public URL
     config_request = False            # flag to enter config editor
     cf_setup_request = False          # flag to enter CF tunnel setup
+    bundle_export_request = False     # flag to enter bundle export
+    bundle_import_request = False     # flag to enter bundle import
 
     @classmethod
     def emit(cls, msg: str):
@@ -688,6 +690,8 @@ def render_setup(w: int, h: int):
         "  [bold #5294e2]w[/]  [#c8c8c8]Setup Wizard[/]  [dim]— konfigurasi proyek dari awal:[/dim]"
         " install deps, isi MQTT/WA, generate .env, prisma migrate, seed admin\n"
         "  [bold #5294e2]c[/]  [#c8c8c8]Quick Config[/]  [dim]— edit MQTT, AES key, WA di .env tanpa wizard penuh[/dim]\n"
+        "  [bold #5294e2]e[/]  [#c8c8c8]Export Bundle[/]  [dim]— pack env + db + cloudflare jadi 1 ZIP terenkripsi[/dim]\n"
+        "  [bold #5294e2]i[/]  [#c8c8c8]Import Bundle[/]  [dim]— restore dari ZIP (backup file lama otomatis)[/dim]\n"
         "  [dim]Tekan [/dim][bold #5294e2]a-i[/][dim] untuk step individual, [/dim]"
         "[bold #5294e2]h[/][dim]=CF full, [/dim][bold #5294e2]i[/][dim]=CF quick tunnel[/dim]",
         border_style="#5294e2", style="on #111a27", height=5,
@@ -783,6 +787,8 @@ HELP_TXT = """\
   [dim]b[/dim]     open browser  (http://localhost:3000)
   [dim]w[/dim]     full setup wizard  (from-zero project setup)
   [dim]c[/dim]     quick config editor  (edit MQTT, AES, WA in .env)
+  [dim]e[/dim]     export config bundle  (env + db + cf -> encrypted ZIP)
+  [dim]i[/dim]     import config bundle  (restore from ZIP, backup old to .bak)
   [dim]q[/dim]     quit
   [dim]a-i[/dim]   run setup step  (only works while SETUP tab is active)
 
@@ -1141,6 +1147,15 @@ def handle_key(raw: bytes):
         # Exit Live loop → config editor → restart
         S.config_request = True
         S.running = False
+    elif k == b"e":
+        # Exit Live loop → bundle export → restart
+        S.bundle_export_request = True
+        S.running = False
+    elif k == b"i" and S.tab != "setup":
+        # Exit Live loop → bundle import → restart
+        # (di tab setup, 'i' dipakai untuk CF quick tunnel — handler di blok bawah)
+        S.bundle_import_request = True
+        S.running = False
     elif S.tab == "setup" and k in b"abcdefghi":
         # SETUP tab: a-i run setup steps (must be checked BEFORE h/b global handlers)
         key_char = k.decode()
@@ -1345,7 +1360,7 @@ APD_SERVICE_TOKEN={token}
 APD_ENCRYPTION_KEY={enc_key}
 
 # YOLO model
-YOLO_MODEL_PATH={cfg.get('model_path', './best.pt')}
+YOLO_MODEL_PATH={cfg.get('model_path', 'models/ppe_best.pt')}
 
 # Node detection endpoint (where Next.js runs)
 NODE_DETECTION_URL={cfg.get('app_url', 'http://localhost:3000')}
@@ -1498,7 +1513,7 @@ def run_wizard() -> None:
 
     cfg["model_path"] = _ask(
         "Path ke YOLO model (.pt)",
-        default=str(pt_files[0].relative_to(BASE_DIR)) if pt_files else "./best.pt"
+        default=str(pt_files[0].relative_to(BASE_DIR)) if pt_files else "models/ppe_best.pt"
     )
     # normalize to forward slashes
     cfg["model_path"] = cfg["model_path"].replace("\\", "/")
@@ -1617,7 +1632,7 @@ def run_wizard() -> None:
     (_ok if (t1 and t1==t2) else _err)("APD_SERVICE_TOKEN sync" if (t1 and t1==t2) else "APD_SERVICE_TOKEN MISMATCH")
 
     # Check model
-    model_p = BASE_DIR / cfg.get("model_path","best.pt")
+    model_p = BASE_DIR / cfg.get("model_path","models/ppe_best.pt")
     (_ok if model_p.exists() else _warn)(
         f"Model {cfg.get('model_path')}  {'ditemukan' if model_p.exists() else 'TIDAK ADA — letakkan file .pt sebelum menjalankan backend'}"
     )
@@ -1895,6 +1910,162 @@ def run_cf_setup() -> None:
 
 
 # ══════════════════════════════════════════════════════════
+#  CONFIG BUNDLE — Export / Import (key E / I)
+# ══════════════════════════════════════════════════════════
+
+def _bundle_default_path(prefix: str = "safeguard-bundle") -> Path:
+    """Default output path: <prefix>-<host>-<YYYYMMDD-HHMMSS>.zip di project root."""
+    import socket as _socket
+    from datetime import datetime as _dt
+    host = _socket.gethostname().lower().replace(" ", "-")
+    ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+    return BASE_DIR / f"{prefix}-{host}-{ts}.zip"
+
+
+def run_bundle_export() -> None:
+    """Export config (env + db + cf) ke ZIP terenkripsi.
+    Exits Live display, prompts user, runs scripts.config_bundle export."""
+    console.clear()
+    console.print()
+    console.print(Panel(
+        "[bold #5294e2]EXPORT CONFIG BUNDLE[/]\n\n"
+        "[dim]Pack semua konfigurasi runtime ke 1 file ZIP terenkripsi:\n"
+        "  - .env (root) + web-dashboard/.env.local\n"
+        "  - SQLite database (safeguard.db + WAL files)\n"
+        "  - cloudflared/config.yml + tunnel credentials JSON\n\n"
+        "Cocok untuk pindah ke laptop demo atau backup harian.[/dim]",
+        border_style="#5294e2", style="on #0e1a2c"
+    ))
+    console.print()
+
+    default_out = _bundle_default_path()
+    out_str = input(f"  Output path [{default_out.name}]: ").strip()
+    out_path = Path(out_str).resolve() if out_str else default_out
+
+    console.print()
+    console.print("  [dim]Password ZIP (kosong = no encryption — TIDAK direkomendasikan)[/dim]")
+    import getpass
+    password = getpass.getpass("  Password : ")
+    if password:
+        confirm = getpass.getpass("  Confirm  : ")
+        if confirm != password:
+            console.print("\n  [#e55561][!] Password tidak cocok. Cancelled.[/]\n")
+            input("  Tekan Enter untuk kembali...")
+            return
+
+    console.print()
+    console.print(f"  [dim]Building bundle...[/dim]")
+    try:
+        from scripts import config_bundle  # type: ignore
+        rc = config_bundle.export_bundle(out_path, password)
+        if rc == 0:
+            S.emit(f"[#23c18b]Bundle exported[/] → {out_path.name}")
+        else:
+            S.emit(f"[#e55561]Bundle export FAILED (rc={rc})[/]")
+    except Exception as e:
+        console.print(f"\n  [#e55561][!] Error: {e}[/]\n")
+        S.emit(f"[#e55561]Bundle export error: {e}[/]")
+
+    console.print()
+    input("  Tekan Enter untuk kembali ke TUI...")
+
+
+def run_bundle_import() -> None:
+    """Import config dari ZIP bundle, backup file lama ke .bak.
+    Exits Live display, prompts user, runs scripts.config_bundle import."""
+    console.clear()
+    console.print()
+    console.print(Panel(
+        "[bold #ffcc55]IMPORT CONFIG BUNDLE[/]\n\n"
+        "[dim]Restore konfigurasi dari ZIP bundle yang dibuat lewat Export.\n"
+        "File yang ada akan di-backup ke <name>.before-import-<ts>.bak\n"
+        "sehingga aman untuk di-rollback.\n\n"
+        "[#ffcc55]PERINGATAN[/]: Lakukan ini SAAT semua service mati\n"
+        "(tekan [bold]X[/bold] di TUI untuk stop dulu sebelum import).[/dim]",
+        border_style="#ffcc55", style="on #1a170e"
+    ))
+    console.print()
+
+    # Cari kandidat bundle di project root
+    candidates = sorted(BASE_DIR.glob("safeguard-bundle-*.zip"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    if candidates:
+        console.print("  [dim]Bundle yang ditemukan di folder ini:[/dim]")
+        for i, p in enumerate(candidates[:5], 1):
+            ts = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            sz = p.stat().st_size / 1024 / 1024
+            console.print(f"    [bold]{i}[/]  {p.name}  [dim]({sz:.2f} MB, {ts})[/dim]")
+        console.print()
+
+    bundle_str = input("  Path bundle (.zip) atau nomor di atas: ").strip()
+    if not bundle_str:
+        console.print("\n  [dim]Cancelled.[/dim]\n")
+        input("  Tekan Enter untuk kembali...")
+        return
+
+    # Resolve nomor → path
+    if bundle_str.isdigit() and candidates:
+        idx = int(bundle_str) - 1
+        if 0 <= idx < len(candidates):
+            bundle_path = candidates[idx]
+        else:
+            console.print("\n  [#e55561][!] Nomor tidak valid.[/]\n")
+            input("  Tekan Enter untuk kembali...")
+            return
+    else:
+        bundle_path = Path(bundle_str).resolve()
+
+    if not bundle_path.exists():
+        console.print(f"\n  [#e55561][!] File tidak ditemukan: {bundle_path}[/]\n")
+        input("  Tekan Enter untuk kembali...")
+        return
+
+    console.print()
+    import getpass
+    password = getpass.getpass("  Password (kosong kalau tidak encrypted): ")
+
+    # Dry-run dulu untuk tampilkan rencana
+    console.print()
+    console.print("  [dim]== DRY RUN (preview) ==[/dim]")
+    try:
+        from scripts import config_bundle  # type: ignore
+        rc = config_bundle.import_bundle(bundle_path, password, dry_run=True)
+        if rc != 0:
+            console.print("\n  [#e55561][!] Dry-run gagal. Cek pesan di atas.[/]\n")
+            input("  Tekan Enter untuk kembali...")
+            return
+    except Exception as e:
+        console.print(f"\n  [#e55561][!] Error: {e}[/]\n")
+        input("  Tekan Enter untuk kembali...")
+        return
+
+    # Konfirmasi sebelum eksekusi
+    console.print()
+    if not _ask_yn("Lanjut restore (file lama akan di-backup ke .bak)?", default=False):
+        console.print("\n  [dim]Cancelled.[/dim]\n")
+        input("  Tekan Enter untuk kembali...")
+        return
+
+    # Eksekusi
+    console.print()
+    console.print("  [dim]== EXECUTING RESTORE ==[/dim]")
+    try:
+        rc = config_bundle.import_bundle(bundle_path, password, dry_run=False)
+        if rc == 0:
+            S.emit(f"[#23c18b]Bundle imported[/] from {bundle_path.name}")
+            # Force preflight refresh agar status panel update
+            S._preflight_t = 0
+        else:
+            S.emit(f"[#e55561]Bundle import FAILED (rc={rc})[/]")
+    except Exception as e:
+        console.print(f"\n  [#e55561][!] Error: {e}[/]\n")
+        S.emit(f"[#e55561]Bundle import error: {e}[/]")
+
+    console.print()
+    input("  Tekan Enter untuk kembali ke TUI...")
+
+
+# ══════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════
 
@@ -1932,6 +2103,8 @@ def main():
         S.wizard_request = False
         S.config_request = False
         S.cf_setup_request = False
+        S.bundle_export_request = False
+        S.bundle_import_request = False
 
         try:
             with Live(
@@ -1956,6 +2129,10 @@ def main():
             run_config_editor()
         elif getattr(S, "cf_setup_request", False):
             run_cf_setup()
+        elif getattr(S, "bundle_export_request", False):
+            run_bundle_export()
+        elif getattr(S, "bundle_import_request", False):
+            run_bundle_import()
         else:
             break
 

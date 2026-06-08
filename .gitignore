@@ -1,6 +1,8 @@
-# ============================================================
-# Python
-# ============================================================
+# ╔══════════════════════════════════════════════════════════╗
+# ║  SafeGuard APD — .gitignore                              ║
+# ╚══════════════════════════════════════════════════════════╝
+
+# ── Python ────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,120 +11,86 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Virtual Environment
+# ── Virtual environments ──────────────────────────────────────
 .venv/
 venv/
 ENV/
 
-# ============================================================
-# Environment & Secrets
-# ============================================================
+# ── Secrets & environment ─────────────────────────────────────
 .env
 *.env.local
+*.env.bak
+*.env.env*
 
-# ============================================================
-# YOLO / Ultralytics
-# ============================================================
-.ultralytics/
-runs/detect/val*/
-runs/detect/predict*/
-tmp_violation*.jpg
-
-# ============================================================
-# Datasets (terlalu besar untuk git)
-# ============================================================
-CHV-YOLOv8/train/
-CHV-YOLOv8/valid/
-CHV-YOLOv8/test/
-VEST-1/train/
-VEST-1/valid/
-VEST-1/test/
-
-# ============================================================
-# Model Weights (terlalu besar untuk git)
-# ============================================================
-*.pt
-runs/detect/ppe_training/*/weights/
-
-# ============================================================
-# Node.js
-# ============================================================
+# ── Node.js ───────────────────────────────────────────────────
 node_modules/
-.next/
-out/
+web-dashboard/.next/
+web-dashboard/out/
 
-# ============================================================
-# IDE
-# ============================================================
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# ============================================================
-# OS
-# ============================================================
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ============================================================
-# Logs
-# ============================================================
-*.log
-
-# ============================================================
-# Temporary
-# ============================================================
-*.tmp
-*.bak
-
-# ============================================================
-# SQLite Database & Backup (lokal, jangan commit)
-# ============================================================
+# ── Database (SQLite local state — backup via TUI bundle) ─────
 web-dashboard/data/*.db
 web-dashboard/data/*.db-wal
 web-dashboard/data/*.db-shm
 web-dashboard/data/.migrated
 web-dashboard/data/backup/
 
-# ============================================================
-# Audio assets (besar)
-# ============================================================
-*.mp3
-
-# ============================================================
-# Sementara
-# ============================================================
-__sanity_pp.ts
+# ── YOLO / Ultralytics ────────────────────────────────────────
+.ultralytics/
 runs/
+tmp_violation*.jpg
 
-esp32-alarm/jokowi.mp3
+# Model weights (besar, regenerate via `python training/2_train_ppe.py`
+# atau download dari rilis). Pengecualian: README di models/.
+*.pt
+*.onnx
+*.engine
+!models/README.md
 
+# ── Datasets (besar, di-download via `python training/1_download_dataset.py`) ─
+CHV-YOLOv8/train/
+CHV-YOLOv8/valid/
+CHV-YOLOv8/test/
+other/datasets/*/train/
+other/datasets/*/valid/
+other/datasets/*/test/
 
+# ── Audio source files (di-upload ke VPS, bukan source code) ──
+other/sound/*.mp3
+other/sound/*.mpeg
+other/sound/*.txt
+# Pengecualian: audio kecil yang di-flash ke SPIFFS ESP32 (bagian deploy).
+!alarm_apd/data/*.mp3
 
-# ============================================================
-# Build cache (Next.js dev)
-# ============================================================
-web-dashboard/.next/
-
-# ============================================================
-# Sound source / upload helpers (besar, bukan source code)
-# ============================================================
-sound/*.mpeg
-sound/*.txt
-sound/*.mp3
-
-# ============================================================
-# Scratch / experimental scripts
-# ============================================================
-test_agentrouter.py
-check_disk*.ps1
-upload_model_to_roboflow.py
-progress/
-
-# ============================================================
-# PlatformIO build artifacts
-# ============================================================
+# ── ESP32 PlatformIO build artifacts ──────────────────────────
 alarm_apd/.pio/
+
+# ── Cloudflare credentials (token-specific, per-machine) ──────
+web-dashboard/cloudflared/*-credentials.json
+*.before-import-*.bak
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+
+# ── IDE / Editor ──────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Temporary / scratch ───────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+__sanity_pp.ts
+
+# ── Bundle exports (config_bundle.py output) ──────────────────
+safeguard-bundle-*.zip

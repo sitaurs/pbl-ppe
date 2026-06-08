@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Server, AlertTriangle, ShieldCheck, Activity, Camera, Clock } from 'lucide-react';
+import { Server, AlertTriangle, ShieldCheck, Camera, Clock, Wind } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
 import { getYoloWebSocketUrl } from '@/lib/ws-url';
 
@@ -15,6 +15,19 @@ interface NodeData {
   picPhone: string;
   cameraSource: string;
   enabled: boolean;
+  esp32?: {
+    gasSensorEnabled?: boolean;
+    gasThreshold?: number;
+  } | null;
+}
+
+interface GasTelemetryEntry {
+  id: string;
+  nodeId: number;
+  sektorId: string;
+  raw: number;
+  alert: boolean;
+  timestamp: string;
 }
 
 interface ViolationData {
@@ -31,6 +44,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [violations, setViolations] = useState<ViolationData[]>([]);
+  const [gasTelemetry, setGasTelemetry] = useState<GasTelemetryEntry[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [lastFetchAgo, setLastFetchAgo] = useState(0);
@@ -70,12 +84,24 @@ export default function DashboardPage() {
     } catch {}
   }, []);
 
+  const fetchGasTelemetry = useCallback(async () => {
+    try {
+      const res = await fetch('/api/telemetry/gas');
+      if (res.ok) setGasTelemetry(await res.json());
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetchNodes();
     fetchViolations();
-    const interval = setInterval(() => { fetchNodes(); fetchViolations(); }, 15000);
+    fetchGasTelemetry();
+    const interval = setInterval(() => {
+      fetchNodes();
+      fetchViolations();
+      fetchGasTelemetry();
+    }, 15000);
     return () => clearInterval(interval);
-  }, [fetchNodes, fetchViolations]);
+  }, [fetchNodes, fetchViolations, fetchGasTelemetry]);
 
   // WebSocket connection
   useEffect(() => {
@@ -153,6 +179,27 @@ export default function DashboardPage() {
     sectorViolationCounts[v.sektorId] = (sectorViolationCounts[v.sektorId] || 0) + 1;
   });
 
+  // Gas sensor status — derive dari node config + telemetri terbaru per node
+  const FRESHNESS_LIMIT_MS = 5 * 60 * 1000; // 5 menit
+  const gasEnabledNodes = enabledNodes.filter(n => n.esp32?.gasSensorEnabled === true);
+
+  // Map nodeId -> entry telemetri terbaru (kalau ada & masih segar)
+  const gasLatestByNode: Record<number, GasTelemetryEntry | undefined> = {};
+  const now = Date.now();
+  for (const entry of gasTelemetry) {
+    const age = now - new Date(entry.timestamp).getTime();
+    if (age > FRESHNESS_LIMIT_MS) continue;
+    const existing = gasLatestByNode[entry.nodeId];
+    if (!existing || new Date(entry.timestamp).getTime() > new Date(existing.timestamp).getTime()) {
+      gasLatestByNode[entry.nodeId] = entry;
+    }
+  }
+
+  // Count node yang sedang alert vs total node dengan sensor aktif
+  const gasAlertCount = gasEnabledNodes.filter(n => gasLatestByNode[n.id]?.alert === true).length;
+  const gasSensorCount = gasEnabledNodes.length;
+  const hasGasAlert = gasAlertCount > 0;
+
   const sortedNodes = [...enabledNodes].sort((a, b) => {
     const aCount = sectorViolationCounts[a.sektorId] || 0;
     const bCount = sectorViolationCounts[b.sektorId] || 0;
@@ -218,19 +265,96 @@ export default function DashboardPage() {
           </div>
         </Link>
 
-        <Link href="/violations" className="card p-5 cursor-pointer hover:-translate-y-0.5 transition-transform">
+        <Link href="/nodes" className="card p-5 cursor-pointer hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Total Deteksi</p>
-              <p className="text-2xl font-bold mt-1" style={{ color: 'var(--orange)' }}>{totalDetections}</p>
-              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>seluruh riwayat</p>
+              <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Gas Alert</p>
+              <p
+                className={`text-2xl font-bold mt-1 ${hasGasAlert ? 'animate-pulse-dot' : ''}`}
+                style={{ color: hasGasAlert ? 'var(--orange)' : 'var(--accent)' }}
+              >
+                {gasAlertCount} / {gasSensorCount}
+              </p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                {gasSensorCount === 0 ? 'sensor MQ-135 belum aktif' : `node sensor ${hasGasAlert ? 'ALERT' : 'normal'}`}
+              </p>
             </div>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'var(--orange)' }}>
-              <Activity size={18} color="white" />
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{ background: hasGasAlert ? 'var(--orange)' : 'var(--accent)' }}
+            >
+              <Wind size={18} color="white" />
             </div>
           </div>
         </Link>
       </div>
+
+      {/* Section 2.5: Gas Sensor Status Strip — hanya tampil bila ada node dengan MQ-135 aktif */}
+      {gasSensorCount > 0 && (
+        <div className="mb-6 stagger-item stagger-2">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Status Sensor Gas (MQ-135)</h2>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              polling 15s · ambang batas dari konfigurasi node
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {gasEnabledNodes.map((node) => {
+              const entry = gasLatestByNode[node.id];
+              const isAlert = entry?.alert === true;
+              const noData = !entry;
+              const threshold = node.esp32?.gasThreshold ?? 2200;
+
+              const borderColor = isAlert
+                ? 'var(--orange)'
+                : noData
+                ? 'var(--text-muted)'
+                : 'var(--accent)';
+              const dotColor = isAlert
+                ? 'var(--orange)'
+                : noData
+                ? 'var(--text-muted)'
+                : 'var(--accent)';
+              const statusLabel = isAlert ? 'ALERT' : noData ? 'NO DATA' : 'OK';
+
+              return (
+                <Link
+                  key={node.id}
+                  href="/nodes"
+                  className="card p-4 cursor-pointer hover:-translate-y-0.5 transition-transform"
+                  style={{ borderLeft: `3px solid ${borderColor}` }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+                      {node.sektorName}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${isAlert ? 'animate-pulse-dot' : ''}`}
+                        style={{ background: dotColor }}
+                      />
+                      <span className="text-[10px] font-bold uppercase" style={{ color: dotColor }}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {entry ? entry.raw : '—'}
+                    </span>
+                    <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      / {threshold}
+                    </span>
+                  </div>
+                  <p className="text-[11px] mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                    {node.picName || 'tanpa PIC'} · node #{node.id}
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Section 3: Live Sektor Preview */}
       <div className="mb-6 stagger-item stagger-3">

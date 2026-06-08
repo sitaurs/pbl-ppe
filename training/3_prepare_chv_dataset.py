@@ -18,7 +18,7 @@ import zipfile
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent  # project root (training/ -> ..)
 ZIP_PATH = Path(r"C:\Users\Xrif\Downloads\CHV_dataset.zip")
 OUTPUT_DIR = BASE_DIR / "CHV-YOLOv8"
 

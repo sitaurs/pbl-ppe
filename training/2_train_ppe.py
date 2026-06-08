@@ -1,17 +1,19 @@
 # 2_train_ppe.py
 # Script training YOLOv8 custom model untuk deteksi APD (helmet dan vest).
 # Dioptimasi untuk NVIDIA GPU dengan VRAM kecil, dan wajib memakai CUDA.
-# Jalankan: python 2_train_ppe.py
+# Jalankan dari project root:  python training/2_train_ppe.py
 
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+# Script ini ada di training/ — project root adalah parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BASE_DIR = PROJECT_ROOT  # backwards compat untuk variabel lokal di bawah
 
 # Pakai GPU pertama secara eksplisit sebelum PyTorch membaca device CUDA.
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-(BASE_DIR / ".ultralytics").mkdir(exist_ok=True)
-os.environ.setdefault("YOLO_CONFIG_DIR", str(BASE_DIR / ".ultralytics"))
+(PROJECT_ROOT / ".ultralytics").mkdir(exist_ok=True)
+os.environ.setdefault("YOLO_CONFIG_DIR", str(PROJECT_ROOT / ".ultralytics"))
 
 import torch
 from ultralytics import YOLO
@@ -22,11 +24,12 @@ from ultralytics import YOLO
 # =========================
 
 # Path ke data.yaml. Bisa dioverride:
-#   $env:DATA_YAML="E:\pycham pbl\VEST-1\data.yaml"
-DATA_YAML = os.environ.get("DATA_YAML", str(BASE_DIR / "CHV-YOLOv8" / "data.yaml"))
+#   $env:DATA_YAML="D:\path\to\VEST-1\data.yaml"
+DATA_YAML = os.environ.get("DATA_YAML", str(PROJECT_ROOT / "CHV-YOLOv8" / "data.yaml"))
 
 # Base model ringan agar cocok untuk GPU VRAM kecil.
-BASE_MODEL = str(BASE_DIR / "yolov8n.pt")
+# Setelah refactor struktur, weights tinggal di models/.
+BASE_MODEL = str(PROJECT_ROOT / "models" / "yolov8n.pt")
 
 # Hyperparameters untuk GPU kecil seperti NVIDIA MX350 2GB.
 EPOCHS = 50
