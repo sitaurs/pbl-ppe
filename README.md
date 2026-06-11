@@ -1,6 +1,6 @@
 # SafeGuard APD
 
-![Dashboard Preview](docs/assets/dashboard-preview.png)
+![Diagram Sistem](docs/assets/system-diagram.png)
 
 **Sistem Monitoring Kepatuhan Alat Pelindung Diri Pekerja Berbasis YOLO**
 
