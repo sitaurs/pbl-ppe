@@ -6,7 +6,7 @@
 
 Sistem ini memantau kepatuhan penggunaan helm dan rompi keselamatan di area industri secara real-time. Kamera IP menangkap video, YOLOv8 mendeteksi pelanggaran, alarm fisik berbunyi via ESP32, notifikasi WhatsApp dikirim ke penanggung jawab, dan seluruh data tercatat di dashboard web yang aman.
 
-> **Proyek Berbasis Lapangan (PBL) — Politeknik Negeri Malang**
+> **Project Based Learning (PBL) — Politeknik Negeri Malang**
 > Menggabungkan tiga mata kuliah: Pengolahan Citra Digital, Keamanan Jaringan Cyber, dan IoT/WSN.
 
 ---
