@@ -23,7 +23,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id">
-      <body className={fontClass}>
+      <body className={fontClass} suppressHydrationWarning>
         <AuthProvider>
           <div className="flex min-h-screen md:p-3" style={{ background: 'var(--background-flat)' }}>
           {/* Desktop Sidebar + Main Content (client component) */}

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,8 @@ ENV_FILE      = BASE_DIR / ".env"
 ENV_LOCAL     = DASHBOARD_DIR / ".env.local"
 DB_FILE       = DASHBOARD_DIR / "data" / "safeguard.db"
 LOG_FILE      = BASE_DIR / "apd_detection.log"
+VENV_PYTHON   = BASE_DIR / "venv" / "Scripts" / "python.exe"
+PYTHON_EXE    = str(VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable))
 
 def _find_cloudflared() -> str | None:
     """Find cloudflared binary. Checks PATH first, then common MSI install paths."""
@@ -72,7 +75,7 @@ SERVICES: dict = {
     "python": {
         "name": "Python Backend (YOLO)",
         "port": 8765,
-        "cmd":  [sys.executable, "ServiceAPDBackend.py"],
+        "cmd":  [PYTHON_EXE, "ServiceAPDBackend.py"],
         "cwd":  str(BASE_DIR),
     },
 }
@@ -84,7 +87,7 @@ STEPS = [
     ("d", "npx prisma migrate deploy",                      "npx prisma migrate deploy".split(),                        None),
     ("e", "npm run seed  (buat akun admin default)",        "npm run seed".split(),                                     None),
     ("f", "Sync APD_SERVICE_TOKEN ke root .env",            None,                                                      "sync_token"),
-    ("g", "pip install -r requirements.txt",                [sys.executable, "-m", "pip", "install", "-r",
+    ("g", "pip install -r requirements.txt",                [PYTHON_EXE, "-m", "pip", "install", "-r",
                                                              "requirements.txt"],                                        None),
     ("h", "Cloudflare Token Tunnel (dari CF Dashboard)",    None,                                                      "cf_full"),
     ("i", "Cloudflare Quick Tunnel (tanpa domain)",         None,                                                      "cf_quick"),
@@ -318,6 +321,23 @@ def svc_start(sid: str):
         S.emit(f"error starting {SERVICES[sid]['name']}: {e}")
 
 
+def dashboard_health_ok(timeout: float = 3.0) -> bool:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:3000/api/health", timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def wait_for_dashboard_ready(max_wait_sec: int = 30) -> bool:
+    deadline = time.time() + max_wait_sec
+    while time.time() < deadline:
+        if dashboard_health_ok(timeout=2.0):
+            return True
+        time.sleep(1)
+    return False
+
+
 def svc_start_all_guarded():
     """Start all services with pre-flight guard. Block if critical issues found."""
     issues = preflight_critical_issues()
@@ -330,8 +350,13 @@ def svc_start_all_guarded():
     S._start_blocked = False
     if issues:
         S.emit(f"[#ffcc55]WARN[/] — force starting with {len(issues)} unresolved issues")
-    for sid in SERVICES:
-        svc_start(sid)
+    svc_start("nextjs")
+    S.emit("waiting for Next.js health check on /api/health ...")
+    if wait_for_dashboard_ready():
+        S.emit("[#23c18b]dashboard ready[/] â€” starting Python backend")
+    else:
+        S.emit("[#ffcc55]dashboard not ready after wait[/] â€” Python backend may run in degraded mode")
+    svc_start("python")
     # Also start CF tunnel if token configured
     _cf_auto_start()
 
@@ -353,7 +378,10 @@ def _cf_auto_start():
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0,
         )
         S.cf_tunnel_proc = proc
-        S.cf_tunnel_url = "CF Token Tunnel (connecting...)"
+        # Token tunnel tidak punya public URL yang bisa dibaca lokal seperti
+        # quick tunnel. Selama proses hidup, anggap statusnya running dan
+        # arahkan user untuk verifikasi dari dashboard/domain.
+        S.cf_tunnel_url = "CF Token Tunnel (running)"
         S.step_states["h"] = "done"
         S.emit("[#23c18b]CF Tunnel started[/] (background)")
     except Exception as e:
@@ -1483,7 +1511,7 @@ def run_wizard() -> None:
 
     console.print("  [dim]Menginstall Python packages...[/dim]")
     _run_wiz_cmd(
-        [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+        [PYTHON_EXE, "-m", "pip", "install", "-r", "requirements.txt"],
         str(BASE_DIR), "pip install -r requirements.txt"
     )
 

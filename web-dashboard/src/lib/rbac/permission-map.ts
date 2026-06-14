@@ -103,6 +103,10 @@ export const PERMISSION_MAP: PermissionMapEntry[] = [
   // --- Telemetry --------------------------------------------------------
   { method: "GET",    pathPattern: /^\/api\/telemetry\/gas$/,                     permission: "node:read",            sectorScoped: true },
   { method: "POST",   pathPattern: /^\/api\/telemetry\/gas$/,                     permission: "node:update",          serviceTokenAllowed: true },
+
+  // --- Monitor / MJPEG --------------------------------------------------
+  { method: "GET",    pathPattern: /^\/api\/monitor\/health$/,                    permission: "live:view" },
+  { method: "GET",    pathPattern: /^\/api\/monitor\/stream\/\d+$/,               permission: "live:view",            sectorScoped: true },
 ];
 
 /**

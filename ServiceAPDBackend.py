@@ -12,6 +12,8 @@ import threading
 import time
 import requests
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -141,6 +143,15 @@ def get_registered_nodes():
 
 def send_whatsapp_alert(phone: str, message: str, image_frame=None, camera_source="default"):
     """Mengirim pesan WA & gambar menggunakan GoWA REST API sesuai spesifikasi dokumentasi."""
+    parsed = urlparse((WA_API_URL or "").strip())
+    wa_enabled = bool(parsed.scheme and parsed.netloc and WA_DEVICE_ID and WA_API_USER and WA_API_PASS)
+    if not wa_enabled:
+        logger.warning(
+            "WA notification skipped: konfigurasi GoWA belum lengkap "
+            "(WA_API_URL/WA_DEVICE_ID/WA_API_USER/WA_API_PASS)."
+        )
+        return False, "disabled"
+
     phone_jid = f"{phone}@s.whatsapp.net"
     headers = {"X-Device-Id": WA_DEVICE_ID}
     auth = (WA_API_USER, WA_API_PASS)
@@ -265,6 +276,8 @@ COLOR_VIOLATION = (0, 0, 255)   # Merah
 
 WEBSOCKET_HOST: str = config.WEBSOCKET_HOST
 WEBSOCKET_PORT: int = config.WEBSOCKET_PORT
+MJPEG_HOST: str = config.MJPEG_HOST
+MJPEG_PORT: int = config.MJPEG_PORT
 
 # =========================
 # Gas telemetry (Requirement 8.3, 8.4, 8.7)
@@ -290,6 +303,12 @@ class APDDetectionService:
         self.websocket_clients = set()
         self.loop = None
         self.websocket_thread = None
+        self.mjpeg_thread = None
+        self.mjpeg_httpd = None
+        self.latest_mjpeg_frames = {}
+        self.latest_mjpeg_seq = {}
+        self.latest_mjpeg_lock = threading.Lock()
+        self.mjpeg_conditions = {}
         
         # Lock inference karena YOLO dipanggil dari banyak thread kamera bersamaan
         self.inference_lock = threading.Lock()
@@ -676,6 +695,97 @@ class APDDetectionService:
             logger.error(f"Error in PPE detection: {e}")
             return [], [], frame
 
+    def _get_mjpeg_condition(self, node_key: str) -> threading.Condition:
+        with self.latest_mjpeg_lock:
+            cond = self.mjpeg_conditions.get(node_key)
+            if cond is None:
+                cond = threading.Condition()
+                self.mjpeg_conditions[node_key] = cond
+            return cond
+
+    def update_mjpeg_frame(self, node_key: str, jpeg_bytes: bytes):
+        with self.latest_mjpeg_lock:
+            self.latest_mjpeg_frames[node_key] = jpeg_bytes
+            self.latest_mjpeg_seq[node_key] = self.latest_mjpeg_seq.get(node_key, 0) + 1
+        cond = self._get_mjpeg_condition(node_key)
+        with cond:
+            cond.notify_all()
+
+    def handle_mjpeg_request(self, handler: BaseHTTPRequestHandler):
+        path = (handler.path or "").split("?", 1)[0]
+        if path == "/health":
+            payload = json.dumps({"status": "ok", "service": "mjpeg"}).encode("utf-8")
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Content-Length", str(len(payload)))
+            handler.end_headers()
+            handler.wfile.write(payload)
+            return
+
+        if not path.startswith("/stream/"):
+            handler.send_error(404)
+            return
+
+        node_key = path.rsplit("/", 1)[-1].strip()
+        if not node_key:
+            handler.send_error(400, "missing node id")
+            return
+
+        cond = self._get_mjpeg_condition(node_key)
+        handler.send_response(200)
+        handler.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        handler.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        handler.send_header("Pragma", "no-cache")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+
+        last_seq = -1
+
+        try:
+            while self.running:
+                with self.latest_mjpeg_lock:
+                    frame = self.latest_mjpeg_frames.get(node_key)
+                    seq = self.latest_mjpeg_seq.get(node_key, 0)
+                if frame is None:
+                    with cond:
+                        cond.wait(timeout=0.25)
+                    continue
+
+                if seq == last_seq:
+                    with cond:
+                        cond.wait(timeout=0.05)
+                    continue
+
+                handler.wfile.write(b"--frame\r\n")
+                handler.wfile.write(b"Content-Type: image/jpeg\r\n")
+                handler.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("utf-8"))
+                handler.wfile.write(frame)
+                handler.wfile.write(b"\r\n")
+                handler.wfile.flush()
+                last_seq = seq
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as e:
+            logger.debug(f"[MJPEG] stream {node_key} ditutup: {e}")
+
+    def start_mjpeg_server(self):
+        service = self
+
+        class MJPEGHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                service.handle_mjpeg_request(self)
+
+            def log_message(self, _format, *args):
+                return
+
+        self.mjpeg_httpd = ThreadingHTTPServer((MJPEG_HOST, MJPEG_PORT), MJPEGHandler)
+        logger.info(f"MJPEG server started on http://{MJPEG_HOST}:{MJPEG_PORT}")
+        self.mjpeg_httpd.serve_forever(poll_interval=0.5)
+
+    def run_mjpeg_server(self):
+        self.start_mjpeg_server()
+
     def process_camera_node(self, node):
         """Thread Worker per Kamera/Node."""
         camera_source = str(node.get("cameraSource", "0"))
@@ -812,6 +922,8 @@ class APDDetectionService:
                     
                     success, buffer = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
                     if success:
+                        jpeg_bytes = buffer.tobytes()
+                        self.update_mjpeg_frame(str(node_id) if node_id is not None else camera_source, jpeg_bytes)
                         frame_b64 = base64.b64encode(buffer).decode("utf-8")
                         message = {
                             "event": "video_frame",
@@ -873,6 +985,12 @@ class APDDetectionService:
     def stop_service(self):
         logger.info("Stopping Multi-Node APD Service...")
         self.running = False
+        if self.mjpeg_httpd:
+            try:
+                self.mjpeg_httpd.shutdown()
+                self.mjpeg_httpd.server_close()
+            except Exception:
+                pass
         if self.mqtt_client:
             self.mqtt_client.loop_stop()
             self.mqtt_client.disconnect()
@@ -885,6 +1003,8 @@ class APDDetectionService:
         # Start WebSocket
         self.websocket_thread = threading.Thread(target=self.run_websocket_server, daemon=True)
         self.websocket_thread.start()
+        self.mjpeg_thread = threading.Thread(target=self.run_mjpeg_server, daemon=True)
+        self.mjpeg_thread.start()
         time.sleep(1)
 
         # Start Camera Threads

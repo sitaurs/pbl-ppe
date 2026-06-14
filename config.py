@@ -74,13 +74,20 @@ CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.65"))
 PERSON_CONFIDENCE_THRESHOLD: float = float(os.getenv("PERSON_CONFIDENCE_THRESHOLD", "0.60"))
 COOLDOWN_SECONDS: int = int(os.getenv("COOLDOWN_SECONDS", "2"))
 WA_COOLDOWN_SECONDS: int = int(os.getenv("WA_COOLDOWN_SECONDS", "120"))
-SEND_FRAME_INTERVAL: float = 0.1
+# Target stream ~20 FPS ke dashboard monitor.
+SEND_FRAME_INTERVAL: float = 0.05
 
 # ============================================================
 # WebSocket Server
 # ============================================================
 WEBSOCKET_HOST: str = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
 WEBSOCKET_PORT: int = int(os.getenv("WEBSOCKET_PORT", "8765"))
+
+# ============================================================
+# MJPEG Server
+# ============================================================
+MJPEG_HOST: str = os.getenv("MJPEG_HOST", "127.0.0.1")
+MJPEG_PORT: int = int(os.getenv("MJPEG_PORT", "8766"))
 
 # ============================================================
 # Dashboard
