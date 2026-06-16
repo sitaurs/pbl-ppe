@@ -13,6 +13,10 @@ import type { StepESP32ConfigValues } from '@/components/wizard/StepESP32Config'
 const sectorInfoArb: fc.Arbitrary<StepSectorInfoValues> = fc.record({
   nodeName: fc.string({ minLength: 1, maxLength: 100 }),
   sektorId: fc.string({ minLength: 1, maxLength: 10 }),
+  picName: fc
+    .string({ minLength: 1, maxLength: 100 })
+    .filter((s) => s.trim().length > 0),
+  picPhone: fc.constantFrom('', '6281234567890', '081234567890'),
 });
 
 const cameraConfigArb: fc.Arbitrary<StepCameraConfigValues> = fc.record({
@@ -49,7 +53,7 @@ const navigationSequenceArb: fc.Arbitrary<number[]> = fc.array(stepArb, {
 function createInitialState(): WizardState {
   return {
     currentStep: 0,
-    sectorInfo: { nodeName: '', sektorId: '' },
+    sectorInfo: { nodeName: '', sektorId: '', picName: '', picPhone: '' },
     cameraConfig: {
       rtspUrl: '',
       resolution: '',

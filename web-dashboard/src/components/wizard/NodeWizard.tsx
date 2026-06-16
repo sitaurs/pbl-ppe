@@ -6,6 +6,7 @@ import { NodeWizardProps, NodeData } from '@/lib/node-types';
 import WizardStepper from '@/components/wizard/WizardStepper';
 import { usePermission } from '@/hooks/use-permission';
 import { useApiFetch } from '@/hooks/use-csrf-token';
+import { normalizePhone } from '@/lib/phone';
 import StepSectorInfo, {
   StepSectorInfoValues,
   validateStepSectorInfo,
@@ -49,6 +50,8 @@ function createInitialState(initialData?: Partial<NodeData>): WizardState {
   const sectorInfo: StepSectorInfoValues = {
     nodeName: initialData?.sektorName || '',
     sektorId: initialData?.sektorId || '',
+    picName: initialData?.picName || '',
+    picPhone: initialData?.picPhone || '',
   };
 
   const cameraConfig: StepCameraConfigValues = {
@@ -213,8 +216,8 @@ export function buildNodeDataFromWizardState(
   return {
     sektorId: state.sectorInfo.sektorId,
     sektorName: state.sectorInfo.nodeName,
-    picName: initialData?.picName || '',
-    picPhone: initialData?.picPhone || '',
+    picName: state.sectorInfo.picName.trim(),
+    picPhone: state.sectorInfo.picPhone ? normalizePhone(state.sectorInfo.picPhone) : '',
     cameraSource: state.cameraConfig.skipped ? '0' : state.cameraConfig.rtspUrl,
     enabled: initialData?.enabled ?? true,
     camera: state.cameraConfig.skipped

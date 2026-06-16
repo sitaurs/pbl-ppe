@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Studi Kasus IoT &amp; WSN — Latihan Esai UAS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="studi-kasus.css" />
+</head>
+<body>
+
+  <div class="progress-bar" id="progressBar"></div>
+
+  <nav class="navbar" id="navbar">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-dot"></span>
+        <span>IoT&nbsp;·&nbsp;WSN</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="index.html">Materi Visual</a></li>
+        <li><a href="quiz.html">Kuis</a></li>
+        <li><a href="studi-kasus.html" class="nav-active">📖 Studi Kasus</a></li>
+        <li><a href="index.html#cheatsheet">Cheat Sheet</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <header class="quiz-header sk-header">
+    <div class="container">
+      <span class="quiz-tag">Latihan Esai UAS</span>
+      <h1>6 Studi Kasus <span class="grad-text">IoT &amp; WSN</span></h1>
+      <p>
+        Soal tipe rancang arsitektur, buat block diagram, pilih topologi, identifikasi input-output.
+        Setiap kasus dilengkapi <strong>jawaban lengkap + block diagram (Input → Processing → Output)</strong>.
+      </p>
+    </div>
+  </header>
+
+  <!-- ─────── Tip Box ─────── -->
+  <section class="sk-tip">
+    <div class="container">
+      <div class="tip-box">
+        <div class="tip-icon">💡</div>
+        <div>
+          <h4>Format Block Diagram (versi dosen)</h4>
+          <p>Bagi jadi <strong>3 kolom</strong>: <span class="tip-tag inp">INPUT</span> → <span class="tip-tag proc">PROCESSING</span> → <span class="tip-tag out">OUTPUT</span>. Storage (database) masuk Processing, bukan Output.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────── List Kasus ─────── -->
+  <section class="sk-list" id="caseList">
+    <div class="container">
+      <div class="cases-grid" id="casesGrid"></div>
+    </div>
+  </section>
+
+  <!-- ─────── Kasus Detail ─────── -->
+  <section class="sk-detail hidden" id="caseDetail">
+    <div class="container">
+      <button class="btn-back" id="backToList">← Daftar Kasus</button>
+      <div id="caseContent"></div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <p>📖 Studi Kasus UAS Workshop IoT &amp; WSN</p>
+      <p class="footer-sub">Tip: baca soal → identifikasi input/output → pilih topologi → gambar block diagram → justifikasi.</p>
+    </div>
+  </footer>
+
+  <script src="studi-kasus-data.js"></script>
+  <script src="studi-kasus.js"></script>
+</body>
+</html>

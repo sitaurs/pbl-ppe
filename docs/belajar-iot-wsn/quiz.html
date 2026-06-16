@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kuis IoT &amp; WSN — Latihan UAS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="quiz.css" />
+</head>
+<body>
+
+  <div class="progress-bar" id="progressBar"></div>
+
+  <nav class="navbar" id="navbar">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-dot"></span>
+        <span>IoT&nbsp;·&nbsp;WSN</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="index.html">Materi Visual</a></li>
+        <li><a href="quiz.html" class="nav-active">📝 Kuis</a></li>
+        <li><a href="studi-kasus.html">📖 Studi Kasus</a></li>
+        <li><a href="index.html#cheatsheet">Cheat Sheet</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ───────────── HEADER ───────────── -->
+  <header class="quiz-header">
+    <div class="container">
+      <span class="quiz-tag">Latihan UAS · Workshop IoT &amp; WSN</span>
+      <h1>Kuis <span class="grad-text">40 Soal</span> dengan Pembahasan</h1>
+      <p>Setiap jawaban langsung diberi pembahasan + mini cheat sheet. Tidak ada batas waktu, fokus belajar.</p>
+    </div>
+  </header>
+
+  <!-- ───────────── MODE SELECTOR ───────────── -->
+  <section class="quiz-mode-select" id="modeSelect">
+    <div class="container">
+      <h2>Pilih Mode Latihan</h2>
+      <div class="mode-grid">
+        <button class="mode-card" data-mode="all">
+          <div class="mode-icon">📚</div>
+          <h3>Semua Soal</h3>
+          <p>40 soal campuran IoT + WSN, urutan random.</p>
+          <span class="mode-tag">Komprehensif</span>
+        </button>
+        <button class="mode-card" data-mode="iot">
+          <div class="mode-icon">🌐</div>
+          <h3>Fokus IoT</h3>
+          <p>Soal tentang arsitektur IoT, layer, edge/fog/cloud, protokol.</p>
+          <span class="mode-tag">2 soal UAS</span>
+        </button>
+        <button class="mode-card" data-mode="wsn">
+          <div class="mode-icon">📡</div>
+          <h3>Fokus WSN</h3>
+          <p>Topologi, sensor node, tantangan, energy management.</p>
+          <span class="mode-tag">2 soal UAS</span>
+        </button>
+        <button class="mode-card" data-mode="project">
+          <div class="mode-icon">🛡️</div>
+          <h3>SafeGuard APD</h3>
+          <p>Soal khusus implementasi project (MQTT, ESP32, AES, dll).</p>
+          <span class="mode-tag">Praktis</span>
+        </button>
+        <button class="mode-card" data-mode="quick">
+          <div class="mode-icon">⚡</div>
+          <h3>Quick 10</h3>
+          <p>10 soal random untuk pemanasan sebelum ujian.</p>
+          <span class="mode-tag">~5 menit</span>
+        </button>
+        <button class="mode-card" data-mode="hardcore">
+          <div class="mode-icon">🔥</div>
+          <h3>Hardcore</h3>
+          <p>Soal sulit + esai pendek. Cocok malam sebelum ujian.</p>
+          <span class="mode-tag">Bonus</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── QUIZ STAGE ───────────── -->
+  <section class="quiz-stage hidden" id="quizStage">
+    <div class="container">
+      <div class="quiz-toolbar">
+        <button class="btn-back" id="btnBack">← Ganti Mode</button>
+        <div class="quiz-meta">
+          <span id="quizCounter">Soal 1 / 40</span>
+          <span class="dot">·</span>
+          <span id="quizScore">Skor: 0</span>
+          <span class="dot">·</span>
+          <span id="quizStreak">🔥 Streak: 0</span>
+        </div>
+      </div>
+
+      <div class="quiz-progress">
+        <div class="quiz-progress-bar" id="quizProgressBar"></div>
+      </div>
+
+      <div class="quiz-card-wrap" id="quizCard"></div>
+    </div>
+  </section>
+
+  <!-- ───────────── RESULT ───────────── -->
+  <section class="quiz-result-section hidden" id="resultStage">
+    <div class="container">
+      <div class="result-card">
+        <div class="result-emoji" id="resultEmoji">🎉</div>
+        <h2 id="resultVerdict">Selesai!</h2>
+        <div class="result-score">
+          <span id="resultScoreNum">0</span>
+          <span class="result-score-total">/ <span id="resultTotal">10</span></span>
+        </div>
+        <div class="result-pct" id="resultPct">0%</div>
+
+        <div class="result-stats">
+          <div class="rstat">
+            <div class="rstat-num" id="rstatCorrect">0</div>
+            <div class="rstat-lbl">Benar</div>
+          </div>
+          <div class="rstat">
+            <div class="rstat-num" id="rstatWrong">0</div>
+            <div class="rstat-lbl">Salah</div>
+          </div>
+          <div class="rstat">
+            <div class="rstat-num" id="rstatStreak">0</div>
+            <div class="rstat-lbl">Best Streak</div>
+          </div>
+          <div class="rstat">
+            <div class="rstat-num" id="rstatTime">0s</div>
+            <div class="rstat-lbl">Waktu</div>
+          </div>
+        </div>
+
+        <div class="review-section">
+          <h3>📝 Soal yang Salah</h3>
+          <div class="review-list" id="reviewList"></div>
+        </div>
+
+        <div class="result-actions">
+          <button class="btn btn-primary" id="btnRetry">🔄 Coba Lagi</button>
+          <button class="btn btn-ghost" id="btnNewMode">📚 Ganti Mode</button>
+          <a href="index.html" class="btn btn-ghost">🏠 Materi Visual</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <p>📚 Latihan UAS Workshop IoT &amp; WSN · Project SafeGuard APD</p>
+      <p class="footer-sub">Belajar visual + latihan soal = ingatan jangka panjang. Semoga sukses ujiannya!</p>
+    </div>
+  </footer>
+
+  <script src="quiz-data.js"></script>
+  <script src="quiz.js"></script>
+</body>
+</html>

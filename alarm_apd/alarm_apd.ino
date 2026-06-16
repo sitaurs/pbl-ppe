@@ -147,7 +147,21 @@ static unsigned long lastBtnPressMs   = 0;
 
 // Alarm play count
 static int   alarmPlayCount     = 0;
-static const int ALARM_PLAY_MAX = 4;
+static const int ALARM_PLAY_MAX     = 4;   // putaran APD (existing)
+static const int GAS_ALARM_PLAY_MAX = 4;   // BARU — putaran audio gas alarm
+// BARU — flag yang menandai sesi audio aktif adalah gas alarm (bukan APD).
+// Dipakai oleh handleAudioLoop() untuk memilih playMax dinamis
+// (ALARM_PLAY_MAX vs GAS_ALARM_PLAY_MAX). Diset di handleGasAlert() saat
+// memulai sesi gas, di-reset di stopAlarm() dan defensif di awal startAlarm().
+static bool currentAlarmIsGas       = false;
+
+// Quiet window setelah alarm sebelumnya selesai. Selama window ini,
+// event apd_violation / apd_test akan diabaikan oleh mqttCallback().
+static const unsigned long QUIET_WINDOW_MS = 10000;  // 10 detik
+
+// Timestamp millis() saat alarm terakhir selesai. 0 = belum pernah.
+// Diset di stopAlarm() dan di natural-end branch handleAudioLoop().
+static unsigned long lastAlarmEndedAt = 0;
 
 // ─── FORWARD DECLARATIONS ─────────────────────────────────────────────────────
 
@@ -172,6 +186,12 @@ void setupAudio();
 void startAlarm();
 void stopAlarm();
 void handleAudioLoop();
+
+// Pure helper untuk gating alarm berdasarkan jeda sejak alarm terakhir.
+// PBT-able karena tidak mengakses global. Lihat task 6.2 di tasks.md.
+bool shouldStartAlarm(unsigned long now,
+                      unsigned long lastEndedAt,
+                      unsigned long quietMs);
 
 // 4.8 — LED state machine
 void updateLED();
@@ -422,15 +442,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       const char* event = doc["event"] | "";
       Serial.printf("[mqtt] alarm event='%s' dari node %d\n", event, msgNodeId);
       if (strcmp(event, "apd_violation") == 0 || strcmp(event, "apd_test") == 0) {
+        // Bug 4 (firmware) — gating quiet window 10 detik setelah alarm
+        // sebelumnya selesai. Mencegah audio APD retrigger tepat setelah
+        // alarm gas / APD selesai (lihat design.md Bug 4 Sisi B).
+        if (!shouldStartAlarm(millis(), lastAlarmEndedAt, QUIET_WINDOW_MS)) {
+          Serial.println("[alarm] skip — quiet window aktif");
+          return;
+        }
+        // Bug 4 exception: jika gas alarm sedang ALARM_ACTIVE, biarkan selesai.
+        if (systemState == ALARM_ACTIVE && currentAlarmIsGas) {
+          Serial.println("[alarm] skip — gas alarm sedang aktif");
+          return;
+        }
         startAlarm();
       } else if (strcmp(event, "apd_stop") == 0) {
-        stopAlarm();
+        stopAlarm();   // TIDAK di-gate (klausa 3.6)
       } else if (strcmp(event, "gas_test") == 0) {
         // Demo gas alarm via MQTT (tanpa harus tiup sensor MQ-135 fisik).
         // Force handleGasAlert(true) sekali, lalu reset state agar setelah
         // alarm selesai bisa di-trigger lagi.
         Serial.println("[mqtt] gas_test → simulate gas threshold breach");
-        handleGasAlert(true);
+        handleGasAlert(true);   // TIDAK di-gate (out of scope spec ini)
       }
     } else {
       Serial.println("[mqtt] WARN: decrypt/parse gagal — pesan diabaikan.");
@@ -872,6 +904,9 @@ void startAlarm() {
   }
 
   // ── Stream audio dari URL (seperti referensi yang berhasil) ─────────────
+  // Defensif: pastikan flag gas di-clear agar sesi APD memakai
+  // ALARM_PLAY_MAX (bukan GAS_ALARM_PLAY_MAX) di handleAudioLoop().
+  currentAlarmIsGas = false;
   alarmPlayCount = 1;
   currentAudioUrl = ALARM_URL;  // tandai URL aktif untuk handleAudioLoop()
   Serial.printf("[alarm] memutar alarm ke-%d/%d dari URL\n",
@@ -935,6 +970,10 @@ void stopAlarm() {
   // Reset play counter
   alarmPlayCount = 0;
   currentAudioUrl = nullptr;
+  // Reset flag gas-vs-APD agar sesi berikutnya start dari state bersih.
+  currentAlarmIsGas = false;
+  // Catat timestamp alarm selesai untuk gating quiet window di mqttCallback().
+  lastAlarmEndedAt = millis();
 
   // Matikan LED gas alert
   digitalWrite(LED_GAS, LOW);
@@ -971,9 +1010,15 @@ void handleAudioLoop() {
   if (mp3->isRunning()) {
     // Pump data audio ke I2S (non-blocking, satu chunk per call)
     if (!mp3->loop()) {
+      // Pilih playMax dinamis berdasarkan jenis sesi audio aktif:
+      //   - Gas alarm → GAS_ALARM_PLAY_MAX
+      //   - APD alarm → ALARM_PLAY_MAX
+      // Keduanya saat ini bernilai 4, tetapi dipisah agar tunable mandiri.
+      const int playMax = currentAlarmIsGas ? GAS_ALARM_PLAY_MAX : ALARM_PLAY_MAX;
+
       // Satu putaran selesai
       Serial.printf("[audio] putaran %d/%d selesai.\n",
-                    alarmPlayCount, ALARM_PLAY_MAX);
+                    alarmPlayCount, playMax);
 
       // Bersihkan audio objects
       mp3->stop();
@@ -983,10 +1028,10 @@ void handleAudioLoop() {
 
       alarmPlayCount++;
 
-      if (alarmPlayCount <= ALARM_PLAY_MAX) {
+      if (alarmPlayCount <= playMax) {
         // ── Masih ada putaran — stream ulang dari URL aktif ────────────
         Serial.printf("[audio] memulai putaran %d/%d (URL: %s)...\n",
-                      alarmPlayCount, ALARM_PLAY_MAX,
+                      alarmPlayCount, playMax,
                       currentAudioUrl ? currentAudioUrl : "(null)");
         delay(500);  // Jeda antar putaran
 
@@ -1001,9 +1046,12 @@ void handleAudioLoop() {
           stopAlarm();
         }
       } else {
-        // ── Sudah ALARM_PLAY_MAX kali diputar — selesai ──────────────
+        // ── Sudah playMax kali diputar — selesai ──────────────
         Serial.printf("[audio] alarm selesai diputar %d kali.\n",
-                      ALARM_PLAY_MAX);
+                      playMax);
+        // Catat timestamp natural-end (tidak lewat stopAlarm()) untuk
+        // gating quiet window di mqttCallback().
+        lastAlarmEndedAt = millis();
         alarmPlayCount = 0;
         systemState = STANDBY;
         Serial.println("[alarm] kembali ke STANDBY.");
@@ -1011,6 +1059,27 @@ void handleAudioLoop() {
     }
     return;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// shouldStartAlarm()
+//
+// Pure function — return true jika alarm baru boleh dimulai berdasarkan
+// jeda sejak alarm sebelumnya selesai. Tidak mengakses global apa pun.
+// PBT-able lewat alarm_apd/test/test_should_start_alarm/ (Property 8, 9
+// di design.md).
+//
+// Edge cases:
+//   - lastEndedAt == 0  → belum pernah ada alarm → return true.
+//   - now < lastEndedAt → millis() overflow setelah ~49.7 hari →
+//                          conservative: return true.
+// ─────────────────────────────────────────────────────────────────────────────
+bool shouldStartAlarm(unsigned long now,
+                      unsigned long lastEndedAt,
+                      unsigned long quietMs) {
+  if (lastEndedAt == 0) return true;
+  if (now < lastEndedAt) return true;          // overflow safety
+  return (now - lastEndedAt) >= quietMs;
 }
 
 // =============================================================================
@@ -1392,7 +1461,8 @@ void handleGasAlert(bool alert) {
         stopAlarm();
 
         // ── Setup sesi audio gas alarm baru ──
-        Serial.println("[gas-alarm] memutar alarm gas (1 putaran)...");
+        Serial.printf("[gas-alarm] memutar alarm gas (%d putaran)...\n",
+                      GAS_ALARM_PLAY_MAX);
         Serial.printf("[gas-alarm] URL: %s\n", GAS_ALARM_URL);
         systemState = ALARM_ACTIVE;
         currentAudioUrl = GAS_ALARM_URL;  // tandai URL aktif
@@ -1410,10 +1480,12 @@ void handleGasAlert(bool alert) {
         if (mp3 && mp3->begin(audioBuf, i2sOut)) {
           Serial.printf("[gas-alarm] MP3 mulai diputar. Free heap: %u\n",
                         ESP.getFreeHeap());
-          // Gas alarm cukup 1 putaran. Set counter ke ALARM_PLAY_MAX agar
-          // handleAudioLoop() saat increment menjadikannya > MAX → langsung
-          // panggil stopAlarm(). Total: 1 putaran saja.
-          alarmPlayCount = ALARM_PLAY_MAX;
+          // Gas alarm berbunyi GAS_ALARM_PLAY_MAX putaran (default 4),
+          // analog dengan startAlarm() APD. Set counter ke 1 dan tandai
+          // sesi sebagai gas alarm sehingga handleAudioLoop() memakai
+          // GAS_ALARM_PLAY_MAX saat mengevaluasi batas putaran.
+          alarmPlayCount = 1;
+          currentAlarmIsGas = true;
         } else {
           Serial.println("[gas-alarm] ERROR: mp3->begin() gagal!");
           stopAlarm();

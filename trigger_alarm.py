@@ -160,17 +160,20 @@ def main() -> int:
         return send_alarm("gas_test")
     if "--all" in args:
         # Demo dua jenis alarm berurutan: APD test (1 putaran) lalu GAS.
-        # Tunggu jeda agar audio APD selesai sebelum gas alarm dipicu.
+        # Tunggu konfirmasi user (Enter) sebelum lanjut ke gas alarm,
+        # supaya operator bisa mengatur kamera/audience dulu.
         print("=" * 60)
         print("  STAGE 1 of 2 — APD ALARM")
         print("=" * 60)
         rc1 = send_alarm("apd_test")
         if rc1 != 0:
             return rc1
-        wait_sec = 12
         print()
-        print(f"[wait] Tunggu {wait_sec} detik agar audio APD selesai...")
-        time.sleep(wait_sec)
+        try:
+            input("[wait] Tekan ENTER untuk lanjut ke STAGE 2 (GAS ALARM)...")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[wait] Dibatalkan oleh user.")
+            return 0
         print()
         print("=" * 60)
         print("  STAGE 2 of 2 — GAS ALARM")

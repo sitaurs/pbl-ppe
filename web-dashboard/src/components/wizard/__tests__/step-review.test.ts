@@ -17,6 +17,8 @@ describe('StepReview data display logic', () => {
     return {
       nodeName: 'Node Test',
       sektorId: 'S-01',
+      picName: 'Operator A',
+      picPhone: '6281358959349',
       ...overrides,
     };
   }

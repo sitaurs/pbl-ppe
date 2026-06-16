@@ -72,7 +72,7 @@ WA_DEVICE_ID: str = os.getenv("WA_DEVICE_ID", "pbl-alarm")
 # ============================================================
 CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.65"))
 PERSON_CONFIDENCE_THRESHOLD: float = float(os.getenv("PERSON_CONFIDENCE_THRESHOLD", "0.60"))
-COOLDOWN_SECONDS: int = int(os.getenv("COOLDOWN_SECONDS", "2"))
+COOLDOWN_SECONDS: int = int(os.getenv("COOLDOWN_SECONDS", "20"))
 WA_COOLDOWN_SECONDS: int = int(os.getenv("WA_COOLDOWN_SECONDS", "120"))
 # Target stream ~20 FPS ke dashboard monitor.
 SEND_FRAME_INTERVAL: float = 0.05

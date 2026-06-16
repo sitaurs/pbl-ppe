@@ -10,28 +10,39 @@ import { StepESP32ConfigValues } from '../StepESP32Config';
 
 // --- Arbitraries (Generators) ---
 
-// Valid sector info: node name 1-100 chars, sector selected
+// Valid sector info: node name 1-100 chars, sector selected, picName non-empty, picPhone empty or valid
 const validSectorInfoArb: fc.Arbitrary<StepSectorInfoValues> = fc.record({
   nodeName: fc.string({ minLength: 1, maxLength: 100 }).filter((s) => s.trim().length >= 1),
   sektorId: fc.string({ minLength: 1, maxLength: 10 }).filter((s) => s.length > 0),
+  picName: fc
+    .string({ minLength: 1, maxLength: 100 })
+    .filter((s) => s.trim().length >= 1),
+  picPhone: fc.constantFrom('', '6281234567890', '081234567890'),
 });
 
-// Invalid sector info: empty node name or empty sector
+// Invalid sector info: empty node name or empty sector (PIC fields kept valid so the
+// failure isolates to the original sector-info fields).
 const invalidSectorInfoArb: fc.Arbitrary<StepSectorInfoValues> = fc.oneof(
   // Empty node name
   fc.record({
     nodeName: fc.constantFrom('', '   ', '\t', '\n'),
     sektorId: fc.string({ minLength: 1, maxLength: 10 }),
+    picName: fc.constantFrom('Operator A', 'Operator B'),
+    picPhone: fc.constantFrom('', '6281234567890'),
   }),
   // Node name too long (> 100 chars when trimmed)
   fc.record({
     nodeName: fc.string({ minLength: 101, maxLength: 150 }).filter((s) => s.trim().length > 100),
     sektorId: fc.string({ minLength: 1, maxLength: 10 }),
+    picName: fc.constantFrom('Operator A', 'Operator B'),
+    picPhone: fc.constantFrom('', '6281234567890'),
   }),
   // Empty sector ID
   fc.record({
     nodeName: fc.string({ minLength: 1, maxLength: 100 }).filter((s) => s.trim().length >= 1),
     sektorId: fc.constant(''),
+    picName: fc.constantFrom('Operator A', 'Operator B'),
+    picPhone: fc.constantFrom('', '6281234567890'),
   })
 );
 

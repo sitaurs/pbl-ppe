@@ -1,0 +1,162 @@
+﻿[login] OK ù 192.168.88.1:8728
+
+======================================================================
+SYSTEM IDENTITY
+======================================================================
+  [0] name=MikroTik
+
+======================================================================
+SYSTEM RESOURCE
+======================================================================
+  [0] uptime=57m48s  version=6.49.15 (stable)  build-time=Apr/24/2024 13:04:23  factory-software=6.44.5  free-memory=8142848  total-memory=33554432  cpu=MIPS 24Kc V7.4  cpu-count=1  cpu-frequency=650  cpu-load=1  free-hdd-space=7716864  total-hdd-space=16777216  write-sect-since-reboot=239  write-sect-total=239  bad-blocks=0  architecture-name=smips  board-name=hAP lite  platform=MikroTik
+
+======================================================================
+SYSTEM ROUTERBOARD
+======================================================================
+  [0] routerboard=True  board-name=hAP lite  model=RB941-2nD  revision=r3  serial-number=HCN082NB3Z0  firmware-type=qca9531L  factory-firmware=6.48.6  current-firmware=6.48.6  upgrade-firmware=6.49.15
+
+======================================================================
+SYSTEM CLOCK
+======================================================================
+  [0] time=14:05:30  date=jun/04/2026  time-zone-autodetect=True  time-zone-name=Asia/Jakarta  gmt-offset=+07:00  dst-active=False
+
+======================================================================
+SYSTEM NTP CLIENT
+======================================================================
+  [0] enabled=False  primary-ntp=0.0.0.0  secondary-ntp=0.0.0.0  server-dns-names=  mode=broadcast
+
+======================================================================
+USERS
+======================================================================
+  [0] name=admin  group=full  last-logged-in=jun/04/2026 14:03:09  disabled=False
+
+======================================================================
+USER ACTIVE (sesi)
+======================================================================
+  [0] name=admin  address=192.168.88.11  via=winbox  when=jun/04/2026 14:02:35
+  [1] name=admin  address=192.168.88.11  via=web  when=jun/04/2026 14:02:55
+  [2] name=admin  via=console  when=jun/04/2026 14:03:00
+  [3] name=admin  address=192.168.88.11  via=api  when=jun/04/2026 14:05:30
+
+======================================================================
+INTERFACES
+======================================================================
+  [0] name=ether1  type=ether  running=True  disabled=False  mac-address=18:FD:74:20:6D:BA
+  [1] name=ether2  type=ether  running=True  disabled=False  mac-address=18:FD:74:20:6D:BB
+  [2] name=ether3  type=ether  running=False  disabled=False  mac-address=18:FD:74:20:6D:BC
+  [3] name=ether4  type=ether  running=False  disabled=False  mac-address=18:FD:74:20:6D:BD
+  [4] name=pwr-line1  type=ether  running=False  disabled=False  mac-address=18:FD:74:20:6D:BE
+  [5] name=wlan1  type=wlan  running=False  disabled=False  mac-address=18:FD:74:20:6D:BF
+  [6] name=bridge1  type=bridge  running=True  disabled=False  mac-address=18:FD:74:20:6D:BF
+
+======================================================================
+INTERFACE ETHERNET
+======================================================================
+  [0] name=ether1  speed=100Mbps  running=True
+  [1] name=ether2  speed=100Mbps  running=True
+  [2] name=ether3  speed=100Mbps  running=False
+  [3] name=ether4  speed=100Mbps  running=False
+
+======================================================================
+WIRELESS (wlan)
+======================================================================
+  [0] name=wlan1  ssid=PBL-CAMERA  band=2ghz-b/g/n  frequency=2412  disabled=False
+
+======================================================================
+BRIDGE
+======================================================================
+  [0] name=bridge1  protocol-mode=rstp
+
+======================================================================
+BRIDGE PORTS
+======================================================================
+  [0] interface=ether2  bridge=bridge1  pvid=1
+  [1] interface=ether3  bridge=bridge1  pvid=1
+  [2] interface=ether4  bridge=bridge1  pvid=1
+  [3] interface=wlan1  bridge=bridge1  pvid=1
+
+======================================================================
+IP ADDRESS
+======================================================================
+  [0] address=192.168.88.1/24  network=192.168.88.0  interface=bridge1  disabled=False
+  [1] address=192.168.137.2/24  network=192.168.137.0  interface=bridge1  disabled=False
+
+======================================================================
+IP DHCP-CLIENT
+======================================================================
+  (kosong)
+
+======================================================================
+IP DHCP-SERVER
+======================================================================
+  [0] name=dhcp-lan  interface=bridge1  address-pool=pool-lan  disabled=False
+
+======================================================================
+DHCP-SERVER NETWORK
+======================================================================
+  [0] address=192.168.88.0/24  gateway=192.168.88.1  dns-server=192.168.88.1,8.8.8.8
+
+======================================================================
+DHCP LEASES
+======================================================================
+  [0] address=192.168.88.10  mac-address=D8:8B:00:F6:E4:C1  host-name=MV16180417  status=bound
+  [1] address=192.168.88.252  mac-address=9C:2F:9D:72:55:E9  host-name=Xrif  status=bound
+  [2] address=192.168.88.12  mac-address=14:08:08:A6:57:FC  host-name=esp32-A657FC  status=bound
+  [3] address=192.168.88.13  mac-address=70:A6:CC:49:D3:92  host-name=DESKTOP-7JGGV3M  status=bound
+  [4] address=192.168.88.14  mac-address=BA:4A:75:91:3F:67  host-name=Redmi-Note-13  status=bound
+  [5] address=192.168.88.15  mac-address=D2:C3:47:A5:01:39  host-name=Google-Pixel-5  status=bound
+  [6] address=192.168.88.17  mac-address=E0:22:A1:8A:8D:7D  status=bound
+  [7] address=192.168.88.18  mac-address=70:08:94:67:4D:8B  host-name=LAPTOP-91MLM5L9  status=bound
+  [8] address=192.168.88.19  mac-address=40:C2:BA:9C:A9:C0  host-name=LAPTOP-91MLM5L9  status=bound
+  [9] address=192.168.88.16  mac-address=8A:11:50:C5:F0:A2  host-name=Redmi-12  status=bound
+  [10] address=192.168.88.11  mac-address=00:E0:99:00:16:F3  host-name=DESKTOP-7JGGV3M  status=bound
+
+======================================================================
+IP POOL
+======================================================================
+  [0] name=pool-lan  ranges=192.168.88.10-192.168.88.254
+
+======================================================================
+IP ROUTE
+======================================================================
+  [0] dst-address=0.0.0.0/0  gateway=192.168.137.1  distance=1  active=True
+  [1] dst-address=192.168.88.0/24  gateway=bridge1  distance=0  active=True
+  [2] dst-address=192.168.137.0/24  gateway=bridge1  distance=0  active=True
+
+======================================================================
+IP DNS
+======================================================================
+  [0] servers=8.8.8.8,1.1.1.1  dynamic-servers=  allow-remote-requests=True
+
+======================================================================
+FIREWALL FILTER
+======================================================================
+  (kosong)
+
+======================================================================
+FIREWALL NAT
+======================================================================
+  [0] chain=srcnat  action=masquerade  src-address=192.168.88.0/24
+
+======================================================================
+FIREWALL ADDRESS-LIST
+======================================================================
+  (kosong)
+
+======================================================================
+IP SERVICE (akses)
+======================================================================
+  [0] name=telnet  port=23  disabled=False  address=
+  [1] name=ftp  port=21  disabled=False  address=
+  [2] name=www  port=80  disabled=False  address=
+  [3] name=ssh  port=22  disabled=False  address=192.168.88.0/24
+  [4] name=www-ssl  port=443  disabled=True  address=
+  [5] name=api  port=8728  disabled=False  address=
+  [6] name=winbox  port=8291  disabled=False  address=192.168.88.0/24
+  [7] name=api-ssl  port=8729  disabled=False  address=
+
+======================================================================
+DNS STATIC
+======================================================================
+  (kosong)
+

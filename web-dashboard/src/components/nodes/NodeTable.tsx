@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import NodeRow from './NodeRow';
 import { calculateHealthScore } from '@/lib/health-score';
+import { useApiFetch } from '@/hooks/use-csrf-token';
 import type {
   NodeData,
   NodeStatus,
@@ -65,6 +66,11 @@ export default function NodeTable({
   onDelete,
   onViewLive,
 }: NodeTableProps) {
+  // CSRF-aware fetch wrapper for mutating requests (Bug 1 fix).
+  // GET requests in this file (e.g. /api/nodes/{id}/status) intentionally
+  // continue to use raw `fetch` because middleware exempts GET from CSRF.
+  const apiFetch = useApiFetch();
+
   // Expanded node IDs — persists across sort/filter (Req 1.7)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
@@ -286,9 +292,8 @@ export default function NodeTable({
         }
 
         try {
-          const res = await fetch('/api/nodes/test-connection', {
+          const res = await apiFetch('/api/nodes/test-connection', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           });
           return await res.json();
@@ -296,7 +301,7 @@ export default function NodeTable({
           return { status: 'failed', error: 'Gagal menghubungi server' };
         }
       },
-    [nodes]
+    [nodes, apiFetch]
   );
 
   /**

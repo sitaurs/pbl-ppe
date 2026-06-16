@@ -13,6 +13,10 @@ import type { StepSectorInfoValues } from '../StepSectorInfo';
 const sectorInfoArb: fc.Arbitrary<StepSectorInfoValues> = fc.record({
   nodeName: fc.string({ minLength: 1, maxLength: 100 }),
   sektorId: fc.string({ minLength: 1, maxLength: 10 }),
+  picName: fc
+    .string({ minLength: 1, maxLength: 100 })
+    .filter((s) => s.trim().length > 0),
+  picPhone: fc.constantFrom('', '6281234567890', '081234567890'),
 });
 
 // Camera config that is NOT skipped (fully populated)
@@ -246,4 +250,178 @@ describe('Property 7: Composition change preserves invariant (unused fields beco
       { numRuns: 100 }
     );
   });
+});
+
+// ─── Bug 2 (PIC) — exploration property test (task 1b) ─────────────────────
+//
+// **Validates: Requirements 1.3, 1.4** (Current Behavior bug condition PIC).
+//
+// Property (Property 3 di design.md):
+//   FOR ALL X WHERE isBugConditionPic(X) DO
+//     result ← buildNodeDataFromWizardState'(X)
+//     ASSERT result.picName ≠ ''
+//     ASSERT result.picPhone matches /^62[0-9]{8,14}$/
+//
+// **EXPECTED OUTCOME pada UNFIXED code**: Test FAILS — `buildNodeDataFromWizardState`
+// hardcode `picName: initialData?.picName || ''` dan `picPhone: initialData?.picPhone || ''`,
+// dan `StepSectorInfoValues` belum punya field `picName` / `picPhone` untuk dibaca.
+// Counterexample: state dengan user mengisi PIC tetap menghasilkan
+// `result.picName === ''` dan `result.picPhone === ''`.
+
+describe('Bug 2 (PIC) exploration — buildNodeDataFromWizardState memuat picName & picPhone', () => {
+  // Generator picName non-empty, max 100 char.
+  const picNameArb: fc.Arbitrary<string> = fc
+    .string({ minLength: 1, maxLength: 100 })
+    .filter((s) => s.trim().length > 0);
+
+  // Generator picPhone valid format: hasil normalisasi adalah `62` + 8..14 digit.
+  // Untuk exploration test, kita pakai generator yang menghasilkan input sudah
+  // dalam format `62…` agar bug condition (input ada → output kosong) jelas.
+  const picPhoneArb: fc.Arbitrary<string> = fc
+    .stringMatching(/^62[0-9]{8,14}$/);
+
+  // Type augmentation: kami berasumsi setelah fix, StepSectorInfoValues
+  // memiliki field picName dan picPhone. Test ini sengaja menempatkan keduanya
+  // di sectorInfo agar kontrak baru terdokumentasi.
+  type SectorInfoWithPic = StepSectorInfoValues & {
+    picName: string;
+    picPhone: string;
+  };
+
+  const sectorInfoWithPicArb: fc.Arbitrary<SectorInfoWithPic> = fc.record({
+    nodeName: fc.string({ minLength: 1, maxLength: 100 }),
+    sektorId: fc.string({ minLength: 1, maxLength: 10 }),
+    picName: picNameArb,
+    picPhone: picPhoneArb,
+  });
+
+  it('result.picName tidak boleh kosong saat user mengisi picName', () => {
+    fc.assert(
+      fc.property(
+        sectorInfoWithPicArb,
+        activeCameraConfigArb,
+        activeEsp32ConfigArb,
+        (sectorInfo, cameraConfig, esp32Config) => {
+          // Bangun state dengan sectorInfo memuat picName/picPhone.
+          // Cast ke StepSectorInfoValues karena tipe lama belum mengenal
+          // dua field tersebut — fix akan menambahkan keduanya.
+          const state = makeWizardState(
+            sectorInfo as unknown as StepSectorInfoValues,
+            cameraConfig,
+            esp32Config,
+          );
+          const result = buildNodeDataFromWizardState(state);
+
+          // PROPERTY: Pada FIXED code, builder membaca dari state.sectorInfo.picName.
+          // Pada UNFIXED code, builder hardcode `''` → assertion gagal.
+          expect(
+            result.picName,
+            `Builder mengembalikan picName='${result.picName}' meski user mengisi '${sectorInfo.picName}'`,
+          ).not.toBe('');
+        },
+      ),
+      { numRuns: 50 },
+    );
+  });
+
+  it('result.picPhone match /^62[0-9]{8,14}$/ saat user mengisi picPhone', () => {
+    fc.assert(
+      fc.property(
+        sectorInfoWithPicArb,
+        activeCameraConfigArb,
+        activeEsp32ConfigArb,
+        (sectorInfo, cameraConfig, esp32Config) => {
+          const state = makeWizardState(
+            sectorInfo as unknown as StepSectorInfoValues,
+            cameraConfig,
+            esp32Config,
+          );
+          const result = buildNodeDataFromWizardState(state);
+
+          // PROPERTY: Pada FIXED code, builder memanggil normalizePhone(state.sectorInfo.picPhone).
+          // Pada UNFIXED code, builder mengembalikan `''` → assertion gagal.
+          expect(
+            result.picPhone,
+            `Builder mengembalikan picPhone='${result.picPhone}' meski user mengisi '${sectorInfo.picPhone}'`,
+          ).toMatch(/^62[0-9]{8,14}$/);
+        },
+      ),
+      { numRuns: 50 },
+    );
+  });
+});
+
+
+// ─── Bug 2 (PIC) — Preservation property tests (task 2b) ──────────────────────
+//
+// **Validates: Requirements 3.4** (Unchanged Behavior — `picPhone` `62…` di
+// `initialData` tetap dikembalikan apa adanya, idempoten).
+//
+// Property 5 (Preservation) di design.md:
+//
+//   FOR ALL X (NodeMutation) WHERE X.initialData.picPhone matches /^62[0-9]{8,14}$/:
+//     buildNodeDataFromWizardState(state, X.initialData).picPhone
+//       === X.initialData.picPhone   (idempotent re-normalisasi)
+//
+// **EXPECTED OUTCOME pada UNFIXED code**: Tests PASS.
+// Pada UNFIXED code, builder hardcode `picPhone: initialData?.picPhone || ''`,
+// jadi bila `initialData.picPhone === '6281…'`, hasilnya juga `'6281…'`.
+// Pada FIXED code, builder akan memanggil `normalizePhone(state.sectorInfo.picPhone)`,
+// dan karena `normalizePhone` idempoten (Property 4), hasil tetap `'6281…'`.
+//
+// Test ini mengunci kontrak: nilai `picPhone` `62…` di `initialData` SHALL
+// tetap dipreservasi setelah fix.
+
+describe('Bug 2 (PIC) preservation — picPhone 62… di initialData tetap idempoten', () => {
+  // Generator picPhone valid format 62 + 8..14 digit (sudah ternormalisasi).
+  const alreadyNormalizedPhoneArb: fc.Arbitrary<string> = fc.stringMatching(
+    /^62[0-9]{8,14}$/,
+  );
+
+  // Generator picName non-empty (untuk initialData).
+  const initialPicNameArb: fc.Arbitrary<string> = fc
+    .string({ minLength: 1, maxLength: 100 })
+    .filter((s) => s.trim().length > 0);
+
+  it('jika initialData.picPhone sudah dalam format 62…, builder mengembalikan nilai persis sama', () => {
+    fc.assert(
+      fc.property(
+        sectorInfoArb,
+        activeCameraConfigArb,
+        activeEsp32ConfigArb,
+        alreadyNormalizedPhoneArb,
+        initialPicNameArb,
+        (sectorInfo, cameraConfig, esp32Config, initialPicPhone, initialPicName) => {
+          // Wizard `createInitialState` prefill `state.sectorInfo.picName/picPhone`
+          // dari `initialData` saat edit flow. Test ini meniru hasil prefill
+          // tersebut secara eksplisit agar builder membaca nilai `62…`
+          // langsung dari state (bukan dari initialData yang lama di-hardcode).
+          const sectorInfoPrefilled: StepSectorInfoValues = {
+            ...sectorInfo,
+            picName: initialPicName,
+            picPhone: initialPicPhone,
+          };
+          const state = makeWizardState(sectorInfoPrefilled, cameraConfig, esp32Config);
+
+          // Bangun initialData dengan picPhone sudah ternormalisasi.
+          // Cast longgar karena tipe lama belum mengenal field PIC penuh —
+          // tetapi properti `picPhone` & `picName` ada di NodeData schema.
+          const initialData = {
+            picName: initialPicName,
+            picPhone: initialPicPhone,
+          } as Parameters<typeof buildNodeDataFromWizardState>[1];
+
+          const result = buildNodeDataFromWizardState(state, initialData);
+
+          // PROPERTY 5 (preservation idempotence):
+          // `normalizePhone` idempoten untuk input yang sudah `62…`,
+          // jadi `state.sectorInfo.picPhone === '62…'` → builder mengembalikan
+          // nilai persis sama, mengunci kontrak edit-flow round-trip.
+          expect(result.picPhone).toBe(initialPicPhone);
+        },
+      ),
+      { numRuns: 50 },
+    );
+  });
+
 });
