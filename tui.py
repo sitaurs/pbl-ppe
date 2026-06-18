@@ -121,6 +121,14 @@ class S:
     bundle_export_request = False     # flag to enter bundle export
     bundle_import_request = False     # flag to enter bundle import
 
+    # Scroll state per tab — Up/Down/PgUp/PgDn navigate body content yang
+    # melebihi terminal height. Dipakai oleh render_logs (paling sering
+    # kepotong di laptop kecil) dan tab lain yang content-nya panjang.
+    scroll_offset: dict = {"overview": 0, "services": 0, "setup": 0,
+                           "logs": 0, "config": 0, "help": 0}
+    scroll_max: dict    = {"overview": 0, "services": 0, "setup": 0,
+                           "logs": 0, "config": 0, "help": 0}
+
     @classmethod
     def emit(cls, msg: str):
         with cls._lock:
@@ -453,6 +461,9 @@ def render_footer() -> Text:
              ("r","restart"),("h","health"),("b","browser"),("w","wizard"),("c","config"),("q","quit")]
     if S.tab == "setup":
         pairs.insert(-1, ("a-i","run step"))
+    if S.scroll_max.get(S.tab, 0) > 0:
+        # Tampilkan scroll hint kalau ada konten yang melebihi viewport.
+        pairs.insert(-1, ("j/k","scroll"))
     t = Text("  ")
     for k, d in pairs:
         t.append(f" {k} ", style="bold #000000 on #5294e2")
@@ -738,26 +749,41 @@ def render_setup(w: int, h: int):
 # ── logs ──────────────────────────────────────────────────
 def render_logs(w: int, h: int):
     half = max(5, (h - 8) // 2)
+    offset = S.scroll_offset.get("logs", 0)
 
     if LOG_FILE.exists():
-        raw   = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-half:]
+        raw = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        total = len(raw)
+        # Scroll backward dari tail. offset=0 = lihat bagian terbaru.
+        # offset=N = mundur N baris ke history.
+        end = max(half, total - offset)
+        start = max(0, end - half)
+        S.scroll_max["logs"] = max(0, total - half)
+        page = raw[start:end]
         lines = []
-        for l in raw:
+        for l in page:
             if "ERROR" in l:
                 lines.append(f"[#e55561]{l}[/]")
             elif "WARN" in l:
                 lines.append(f"[#ffcc55]{l}[/]")
             else:
                 lines.append(f"[dim]{l}[/dim]")
+        scroll_hint = f"  [{start+1}-{end}/{total}]" if offset > 0 else ""
+        file_title = (
+            f"[#5294e2]apd_detection.log[/]  [dim](last {half} lines, "
+            f"refresh 4s){scroll_hint}[/dim]"
+        )
         file_txt = "\n".join(lines)
     else:
+        S.scroll_max["logs"] = 0
+        file_title = f"[#5294e2]apd_detection.log[/]  [dim](last {half} lines, refresh 4s)[/dim]"
         file_txt = "[dim]  apd_detection.log not found — start the Python backend first.[/dim]"
 
     rt_lines = list(S.log)[-half:]
     rt_txt   = "\n".join(rt_lines) if rt_lines else "[dim]  No runtime events yet.[/dim]"
 
     return Group(
-        Panel(file_txt, title=f"[#5294e2]apd_detection.log[/]  [dim](last {half} lines, refresh 4s)[/dim]",
+        Panel(file_txt, title=file_title,
               border_style="#2e2e2e", style="on #111111"),
         Panel(rt_txt,   title="[#5294e2]RUNTIME LOG[/]  [dim](services started from TUI)[/dim]",
               border_style="#2e2e2e", style="on #111111"),
@@ -1151,6 +1177,39 @@ _TAB_MAP: dict[bytes, str] = {
 
 def handle_key(raw: bytes):
     k = raw.lower()
+
+    # Scroll keys (j/k vim-style untuk single line, J/K untuk page,
+    # plus arrow Up/Down/PgUp/PgDn untuk yang familiar dengan navigasi standar).
+    # Scroll state per-tab di S.scroll_offset, bound ke S.scroll_max.
+    tab = S.tab
+    cur = S.scroll_offset.get(tab, 0)
+    smax = S.scroll_max.get(tab, 0)
+    if raw == b"j":  # line down (lihat lebih banyak konten lama / atas log)
+        S.scroll_offset[tab] = min(smax, cur + 1)
+        return
+    if raw == b"k":  # line up (kembali ke bottom/latest)
+        S.scroll_offset[tab] = max(0, cur - 1)
+        return
+    if raw == b"J":  # page down
+        S.scroll_offset[tab] = min(smax, cur + 10)
+        return
+    if raw == b"K":  # page up
+        S.scroll_offset[tab] = max(0, cur - 10)
+        return
+    # Arrow keys datang sebagai 2-byte: prefix 0xE0 + code.
+    if raw == b"\xe0P":  # Down arrow
+        S.scroll_offset[tab] = min(smax, cur + 1)
+        return
+    if raw == b"\xe0H":  # Up arrow
+        S.scroll_offset[tab] = max(0, cur - 1)
+        return
+    if raw == b"\xe0Q":  # PgDn
+        S.scroll_offset[tab] = min(smax, cur + 10)
+        return
+    if raw == b"\xe0I":  # PgUp
+        S.scroll_offset[tab] = max(0, cur - 10)
+        return
+
     if k in (b"q", b"\x03"):
         S.running = False
     elif k == b"w":
@@ -1204,7 +1263,14 @@ def keyboard_loop():
     while S.running:
         try:
             if msvcrt.kbhit():
-                handle_key(msvcrt.getch())
+                ch = msvcrt.getch()
+                # Arrow keys & function keys di Windows datang 2-byte:
+                # prefix 0xE0 (atau 0x00), lalu kode key. Baca byte kedua.
+                if ch in (b"\xe0", b"\x00") and msvcrt.kbhit():
+                    ch2 = msvcrt.getch()
+                    handle_key(b"\xe0" + ch2)
+                else:
+                    handle_key(ch)
         except Exception:
             pass
         time.sleep(0.05)
