@@ -199,6 +199,15 @@ def fetch_dashboard_settings():
         return None
 
 
+def parse_esp32_node_id_from_topic(topic: str):
+    """Ambil MY_NODE_ID firmware dari topic `apd/alarm/<id>`."""
+    try:
+        tail = str(topic or "").strip().rsplit("/", 1)[-1]
+        return int(tail)
+    except Exception:
+        return None
+
+
 def send_whatsapp_alert(phone: str, message: str, image_frame=None, camera_source="default"):
     """Mengirim pesan WA & gambar menggunakan GoWA REST API sesuai spesifikasi dokumentasi."""
     parsed = urlparse((WA_API_URL or "").strip())
@@ -319,6 +328,11 @@ PERSON_CONFIDENCE_THRESHOLD: float = config.PERSON_CONFIDENCE_THRESHOLD
 COOLDOWN_SECONDS: int = config.COOLDOWN_SECONDS
 WA_COOLDOWN_SECONDS: int = config.WA_COOLDOWN_SECONDS
 SEND_FRAME_INTERVAL: float = config.SEND_FRAME_INTERVAL
+STREAM_MAX_WIDTH: int = max(160, config.STREAM_MAX_WIDTH)
+STREAM_JPEG_QUALITY: int = max(25, min(95, config.STREAM_JPEG_QUALITY))
+WS_BROADCAST_EVERY_N: int = max(1, config.WS_BROADCAST_EVERY_N)
+CAMERA_INPUT_MAX_WIDTH_GPU: int = max(320, config.CAMERA_INPUT_MAX_WIDTH_GPU)
+CAMERA_INPUT_MAX_WIDTH_CPU: int = max(320, config.CAMERA_INPUT_MAX_WIDTH_CPU)
 
 # Detection quality knobs (docs/plans/detection-quality-fix.md)
 MIN_VIOLATION_STREAK: int = config.MIN_VIOLATION_STREAK
@@ -382,6 +396,8 @@ GAS_ALERT_SUSTAIN_SECONDS: int = 30
 GAS_ALERT_WA_COOLDOWN_SECONDS: int = 600  # 10 menit
 # Refresh interval cache nodes untuk lookup PIC saat kirim WA.
 NODES_CACHE_TTL_SECONDS: int = 60
+# Sync interval untuk menambah/menghapus thread kamera saat konfigurasi node berubah.
+NODE_SYNC_INTERVAL_SECONDS: int = 5
 
 class APDDetectionService:
     def __init__(self):
@@ -403,8 +419,12 @@ class APDDetectionService:
         
         # Lock inference karena YOLO dipanggil dari banyak thread kamera bersamaan
         self.inference_lock = threading.Lock()
-        # Thread kamera
-        self.camera_threads = []
+        # Thread kamera aktif per-node. Stop event dipakai agar node yang
+        # dihapus/dinonaktifkan bisa berhenti tanpa restart backend.
+        self.camera_threads = {}
+        self.node_stop_events = {}
+        self.camera_threads_lock = threading.Lock()
+        self.node_sync_thread = None
 
         # State gas telemetry per-node untuk deteksi alert sustained > 30 detik
         # (Requirement 8.7). Key = nodeId (int), value = dict:
@@ -574,6 +594,91 @@ class APDDetectionService:
                     logger.warning(f"Gagal refresh nodes cache: {e}")
             return list(self._nodes_cache)
 
+    def _refresh_nodes_cache(self):
+        """Paksa refresh cache node dari dashboard API."""
+        fresh_nodes = get_registered_nodes()
+        with self._nodes_cache_lock:
+            self._nodes_cache = fresh_nodes
+            self._nodes_cache_at = time.time()
+        return list(fresh_nodes)
+
+    def _get_node_snapshot(self, node_id, fallback=None):
+        """Ambil konfigurasi node terbaru dari cache/dashboard."""
+        nodes = self._get_cached_nodes()
+        for node in nodes:
+            if node.get("id") == node_id:
+                return node
+        return fallback
+
+    def _find_dashboard_node_by_esp32_id(self, esp32_node_id: int):
+        """Cari node dashboard berdasarkan suffix mqttTopic yang dipakai firmware."""
+        if esp32_node_id is None:
+            return None
+        for node in self._get_cached_nodes():
+            esp32_cfg = node.get("esp32") or {}
+            mqtt_topic = (esp32_cfg.get("mqttTopic") or "").strip()
+            if parse_esp32_node_id_from_topic(mqtt_topic) == esp32_node_id:
+                return node
+        return None
+
+    def _sync_camera_threads_once(self):
+        """Sinkronkan daftar node aktif dengan thread kamera yang berjalan."""
+        try:
+            nodes = self._refresh_nodes_cache()
+        except Exception as e:
+            logger.warning(f"[node-sync] gagal refresh daftar node: {e}")
+            return
+
+        active_nodes = {
+            node.get("id"): node
+            for node in nodes
+            if node.get("enabled", True) and node.get("id") is not None
+        }
+
+        with self.camera_threads_lock:
+            # Bersihkan thread yang sudah mati dari registry.
+            dead_ids = [node_id for node_id, thread in self.camera_threads.items() if not thread.is_alive()]
+            for node_id in dead_ids:
+                self.camera_threads.pop(node_id, None)
+                self.node_stop_events.pop(node_id, None)
+
+            # Start thread baru untuk node yang baru ditambahkan / sebelumnya mati.
+            for node_id, node in active_nodes.items():
+                thread = self.camera_threads.get(node_id)
+                if thread and thread.is_alive():
+                    continue
+
+                stop_event = threading.Event()
+                worker = threading.Thread(
+                    target=self.process_camera_node,
+                    args=(node, stop_event),
+                    daemon=True,
+                    name=f"CameraNode-{node_id}",
+                )
+                self.node_stop_events[node_id] = stop_event
+                self.camera_threads[node_id] = worker
+                worker.start()
+                logger.info(
+                    f"[node-sync] start thread nodeId={node_id} "
+                    f"sektor={node.get('sektorName', '<unknown>')}"
+                )
+
+            # Stop thread untuk node yang tidak lagi aktif / dihapus.
+            stale_ids = [node_id for node_id in self.camera_threads.keys() if node_id not in active_nodes]
+            for node_id in stale_ids:
+                stop_event = self.node_stop_events.get(node_id)
+                if stop_event and not stop_event.is_set():
+                    stop_event.set()
+                    logger.info(f"[node-sync] stop thread nodeId={node_id} (disabled/deleted)")
+
+    def run_node_sync_loop(self):
+        while self.running:
+            try:
+                self._sync_camera_threads_once()
+            except Exception as e:
+                logger.warning(f"[node-sync] loop error: {e}")
+            time.sleep(NODE_SYNC_INTERVAL_SECONDS)
+
     def handle_gas_telemetry(self, data: dict):
         """Proses satu pesan telemetri gas yang sudah di-decrypt.
 
@@ -582,10 +687,19 @@ class APDDetectionService:
         2. Track alert sustained > 30 detik → kirim WA ke PIC sektor
            (Requirement 8.7).
         """
-        node_id = data.get("nodeId")
-        sektor_id = data.get("sektorId", "")
+        esp32_node_id = data.get("nodeId")
+        matched_node = self._find_dashboard_node_by_esp32_id(esp32_node_id)
+        node_id = matched_node.get("id") if matched_node else esp32_node_id
+        sektor_id = matched_node.get("sektorId") if matched_node else data.get("sektorId", "")
         is_alert = data.get("alert", False)
         raw_value = data.get("raw", 0)
+        normalized = {
+            "nodeId": node_id,
+            "sektorId": sektor_id,
+            "raw": raw_value,
+            "alert": is_alert,
+            "timestamp": data.get("timestamp"),
+        }
 
         # 1. Forward ke Next.js Dashboard (Requirement 8.4)
         try:
@@ -593,7 +707,7 @@ class APDDetectionService:
             headers["Content-Type"] = "application/json"
             resp = requests.post(
                 f"{DASHBOARD_API_URL}/api/telemetry/gas",
-                json=data,
+                json=normalized,
                 headers=headers,
                 timeout=5,
             )
@@ -604,7 +718,8 @@ class APDDetectionService:
                 )
             else:
                 logger.debug(
-                    f"[GasTelemetry] nodeId={node_id} raw={raw_value} alert={is_alert} → forwarded."
+                    f"[GasTelemetry] esp32NodeId={esp32_node_id} mappedNodeId={node_id} "
+                    f"raw={raw_value} alert={is_alert} → forwarded."
                 )
         except Exception as e:
             logger.error(f"[GasTelemetry] Gagal forward ke dashboard: {e}")
@@ -1018,7 +1133,7 @@ class APDDetectionService:
     def run_mjpeg_server(self):
         self.start_mjpeg_server()
 
-    def process_camera_node(self, node):
+    def process_camera_node(self, node, stop_event):
         """Thread Worker per Kamera/Node."""
         camera_source = str(node.get("cameraSource", "0"))
         node_id = node.get("id")  # id asli node di DB (dipakai untuk POST violation)
@@ -1063,9 +1178,41 @@ class APDDetectionService:
 
         # Settings live-reload state (Wave 5.3).
         last_settings_refresh = 0.0
+        ws_broadcast_counter = 0
+        last_node_refresh = 0.0
 
-        while self.running:
+        while self.running and not stop_event.is_set():
             try:
+                if time.time() - last_node_refresh > NODE_SYNC_INTERVAL_SECONDS:
+                    latest_node = self._get_node_snapshot(node_id, fallback=node)
+                    if latest_node is None:
+                        logger.info(f"[node-sync] nodeId={node_id} hilang dari dashboard, thread dihentikan.")
+                        break
+                    if not latest_node.get("enabled", True):
+                        logger.info(f"[node-sync] nodeId={node_id} dinonaktifkan, thread dihentikan.")
+                        break
+
+                    latest_camera_source = str(latest_node.get("cameraSource", camera_source))
+                    latest_sektor_name = latest_node.get("sektorName", sektor_name)
+                    if latest_camera_source != camera_source:
+                        logger.info(
+                            f"[node-sync] nodeId={node_id} cameraSource berubah: "
+                            f"{camera_source} -> {latest_camera_source}. Reconnect kamera."
+                        )
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        camera_source = latest_camera_source
+                        cap = self.connect_camera(camera_source)
+                        if not cap:
+                            logger.error(f"[{latest_sektor_name}] Gagal reconnect ke kamera baru {camera_source}")
+                            time.sleep(2)
+                            continue
+
+                    node = latest_node
+                    sektor_name = latest_sektor_name
+                    last_node_refresh = time.time()
                 # Periodic settings refresh — refresh tiap SETTINGS_REFRESH_INTERVAL_S detik.
                 # Operator yang ubah slider di /settings akan ter-apply paling
                 # lambat segini detik tanpa restart backend.
@@ -1096,10 +1243,14 @@ class APDDetectionService:
 
                 frame_count += 1
                 
-                # Resize frame agar ringan. CPU-only mode pakai 480px (lebih ringan
-                # ~30-40%); GPU mode pakai 720px untuk akurasi lebih tinggi.
+                # Resize input kamera sebelum inference supaya decoding + YOLO
+                # lebih ringan di laptop GPU entry-level.
                 h, w = frame.shape[:2]
-                _max_width = 480 if not torch.cuda.is_available() else 720
+                _max_width = (
+                    CAMERA_INPUT_MAX_WIDTH_CPU
+                    if not torch.cuda.is_available()
+                    else CAMERA_INPUT_MAX_WIDTH_GPU
+                )
                 if w > _max_width:
                     scale = _max_width / w
                     frame = cv2.resize(frame, (_max_width, int(h * scale)))
@@ -1184,12 +1335,18 @@ class APDDetectionService:
                                 f"esp32.enabled={esp32_enabled}, mqttTopic={'<empty>' if not mqtt_topic else mqtt_topic!r}"
                             )
                         else:
+                            esp32_node_id = parse_esp32_node_id_from_topic(mqtt_topic)
+                            if esp32_node_id is None:
+                                logger.warning(
+                                    f"[{sektor_name}] mqttTopic tidak valid untuk firmware ESP32: {mqtt_topic!r}"
+                                )
+                                continue
                             payload = {
                                 "event": "apd_violation",
-                                "nodeId": node_id,
+                                "nodeId": esp32_node_id,
                                 "sektorId": node.get("sektorId"),
                                 "violations": violation_names,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                             }
                             enc_msg = self.encrypt_aes128(json.dumps(payload))
                             if enc_msg:
@@ -1239,11 +1396,15 @@ class APDDetectionService:
                 if (current_time - last_frame_send_time) > SEND_FRAME_INTERVAL:
                     # Resize sebelum dikirim via socket untuk hemat CPU/Bandwidth
                     h, w = annotated_frame.shape[:2]
-                    fw = 480
+                    fw = min(STREAM_MAX_WIDTH, w)
                     fh = int(h * (fw / w))
                     resized = cv2.resize(annotated_frame, (fw, fh))
                     
-                    success, buffer = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+                    success, buffer = cv2.imencode(
+                        ".jpg",
+                        resized,
+                        [int(cv2.IMWRITE_JPEG_QUALITY), STREAM_JPEG_QUALITY],
+                    )
                     if success:
                         jpeg_bytes = buffer.tobytes()
                         self.update_mjpeg_frame(str(node_id) if node_id is not None else camera_source, jpeg_bytes)
@@ -1280,8 +1441,10 @@ class APDDetectionService:
                 logger.error(f"[{sektor_name}] Error stream loop: {e}")
                 time.sleep(1)
 
-        if cap:
+        try:
             cap.release()
+        except Exception:
+            pass
         logger.info(f"[{sektor_name}] Thread stopped.")
 
     async def broadcast_to_websocket(self, data):
@@ -1314,6 +1477,9 @@ class APDDetectionService:
     def stop_service(self):
         logger.info("Stopping Multi-Node APD Service...")
         self.running = False
+        with self.camera_threads_lock:
+            for stop_event in self.node_stop_events.values():
+                stop_event.set()
         if self.mjpeg_httpd:
             try:
                 self.mjpeg_httpd.shutdown()
@@ -1336,21 +1502,24 @@ class APDDetectionService:
         self.mjpeg_thread.start()
         time.sleep(1)
 
-        # Start Camera Threads
-        nodes = get_registered_nodes()
-        # Only start enabled nodes
-        nodes = [n for n in nodes if n.get("enabled", True)]
-        if not nodes:
+        # Initial node sync + watcher thread. Node baru/perubahan config akan
+        # ter-pickup tanpa restart backend.
+        initial_nodes = get_registered_nodes()
+        if not initial_nodes:
             logger.warning(
                 "Tidak ada node aktif terdaftar. WebSocket tetap aktif, "
-                "tetapi tidak ada kamera yang dijalankan sampai node ditambahkan."
+                "tetapi kamera akan mulai otomatis saat node ditambahkan."
             )
+        else:
+            logger.info(f"Mempersiapkan {len(initial_nodes)} kamera/node untuk dimonitoring...")
 
-        logger.info(f"Mempersiapkan {len(nodes)} kamera/node untuk dimonitoring...")
-        for node in nodes:
-            t = threading.Thread(target=self.process_camera_node, args=(node,), daemon=True)
-            self.camera_threads.append(t)
-            t.start()
+        self._sync_camera_threads_once()
+        self.node_sync_thread = threading.Thread(
+            target=self.run_node_sync_loop,
+            daemon=True,
+            name="NodeSyncLoop",
+        )
+        self.node_sync_thread.start()
 
         try:
             while self.running: time.sleep(1)

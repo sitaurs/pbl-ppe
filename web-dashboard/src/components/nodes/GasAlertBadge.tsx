@@ -3,13 +3,10 @@
 /**
  * GasAlertBadge — Badge komponen yang menampilkan status gas sensor per node.
  *
- * Menampilkan "Gas: OK" (hijau) atau "Gas: ALERT" (merah) berdasarkan
- * telemetri terbaru (dalam 5 menit terakhir) dari endpoint GET /api/telemetry/gas.
- *
- * Polling dilakukan setiap 30 detik menggunakan native fetch + setInterval.
- * Hanya dirender jika `node.esp32.gasSensorEnabled === true`.
- *
- * Requirements: 8.6
+ * Menampilkan nilai gas terbaru per node. Jika data masih segar (< 5 menit),
+ * badge memakai warna hijau/merah sesuai status alert. Jika data sudah lama,
+ * angka terakhir tetap ditampilkan dengan gaya abu-abu agar operator tetap
+ * melihat pembacaan terakhir, bukan hanya "—".
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -24,41 +21,34 @@ interface GasTelemetryEntry {
 }
 
 interface GasAlertBadgeProps {
-  /** ID node yang ingin ditampilkan statusnya */
   nodeId: number;
-  /** Interval polling dalam milidetik (default: 30000 = 30s) */
   pollingIntervalMs?: number;
-  /** Batas waktu telemetri dianggap fresh, dalam milidetik (default: 300000 = 5 menit) */
   freshnessLimitMs?: number;
 }
 
-type GasStatus = 'alert' | 'ok' | 'no-data' | 'loading' | 'error';
+type GasStatus = 'alert' | 'ok' | 'stale' | 'no-data' | 'loading' | 'error';
 
-/**
- * Tentukan status gas dari daftar telemetri.
- * Ambil entry paling baru untuk nodeId tertentu, filter hanya yang <= 5 menit lalu.
- */
-function resolveGasStatus(
+interface ResolvedGasState {
+  status: GasStatus;
+  latest?: GasTelemetryEntry;
+}
+
+function resolveGasState(
   entries: GasTelemetryEntry[],
   nodeId: number,
   freshnessLimitMs: number,
-): GasStatus {
-  const now = Date.now();
-
-  // Filter entri milik node ini, urutkan terbaru dulu
+): ResolvedGasState {
   const nodeEntries = entries
     .filter((e) => e.nodeId === nodeId)
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-  if (nodeEntries.length === 0) return 'no-data';
+  if (nodeEntries.length === 0) return { status: 'no-data' };
 
   const latest = nodeEntries[0];
-  const age = now - new Date(latest.timestamp).getTime();
+  const age = Date.now() - new Date(latest.timestamp).getTime();
+  if (age > freshnessLimitMs) return { status: 'stale', latest };
 
-  // Jika data lebih dari freshnessLimitMs menit, anggap tidak ada data segar
-  if (age > freshnessLimitMs) return 'no-data';
-
-  return latest.alert ? 'alert' : 'ok';
+  return { status: latest.alert ? 'alert' : 'ok', latest };
 }
 
 export default function GasAlertBadge({
@@ -67,10 +57,10 @@ export default function GasAlertBadge({
   freshnessLimitMs = 5 * 60 * 1000,
 }: GasAlertBadgeProps) {
   const [status, setStatus] = useState<GasStatus>('loading');
+  const [latestEntry, setLatestEntry] = useState<GasTelemetryEntry | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchTelemetry = async () => {
-    // Batalkan request sebelumnya jika masih pending
     if (abortRef.current) {
       abortRef.current.abort();
     }
@@ -88,49 +78,50 @@ export default function GasAlertBadge({
       }
 
       const data: GasTelemetryEntry[] = await res.json();
-      const resolved = resolveGasStatus(data, nodeId, freshnessLimitMs);
-      setStatus(resolved);
+      const resolved = resolveGasState(data, nodeId, freshnessLimitMs);
+      setStatus(resolved.status);
+      setLatestEntry(resolved.latest);
     } catch (err) {
-      // AbortError bukan error nyata — request sengaja dibatalkan
       if (err instanceof Error && err.name === 'AbortError') return;
       setStatus('error');
     }
   };
 
   useEffect(() => {
-    // Fetch segera saat mount
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTelemetry();
-
-    // Polling setiap pollingIntervalMs
     const intervalId = setInterval(fetchTelemetry, pollingIntervalMs);
 
     return () => {
       clearInterval(intervalId);
-      // Batalkan fetch yang sedang berjalan saat unmount
       abortRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId, pollingIntervalMs, freshnessLimitMs]);
 
-  // Jangan render saat loading awal agar tidak ada flicker di row
-  if (status === 'loading' || status === 'no-data' || status === 'error') {
-    // Tampilkan placeholder kecil hanya untuk no-data agar UI konsisten
-    if (status === 'no-data') {
-      return (
-        <span
-          className="gas-badge gas-badge--no-data"
-          title="Belum ada data telemetri gas (< 5 menit)"
-          aria-label="Gas: tidak ada data"
-        >
-          Gas: —
-        </span>
-      );
-    }
+  if (status === 'loading' || status === 'error') {
     return null;
   }
 
-  const isAlert = status === 'alert';
+  const palette =
+    status === 'alert'
+      ? { bg: '#fee2e2', fg: '#dc2626', border: '#fca5a5', dot: '#dc2626', pulse: true }
+      : status === 'ok'
+      ? { bg: '#dcfce7', fg: '#16a34a', border: '#86efac', dot: '#16a34a', pulse: false }
+      : { bg: '#f3f4f6', fg: '#9ca3af', border: '#e5e7eb', dot: '#9ca3af', pulse: false };
+
+  const label =
+    latestEntry
+      ? `Gas: ${latestEntry.raw}`
+      : 'Gas: —';
+
+  const title =
+    status === 'alert'
+      ? `Gas alert aktif. Nilai terakhir: ${latestEntry?.raw ?? '—'}`
+      : status === 'ok'
+      ? `Sensor gas normal. Nilai terakhir: ${latestEntry?.raw ?? '—'}`
+      : latestEntry
+      ? `Data gas terakhir: ${latestEntry.raw} (lebih dari 5 menit lalu)`
+      : 'Belum ada data telemetri gas';
 
   return (
     <>
@@ -150,51 +141,37 @@ export default function GasAlertBadge({
           cursor: default;
           user-select: none;
         }
-        .gas-badge--alert {
-          background: #fee2e2;
-          color: #dc2626;
-          border: 1px solid #fca5a5;
+        .gas-badge--pulse {
           animation: gas-pulse 2s ease-in-out infinite;
-        }
-        .gas-badge--ok {
-          background: #dcfce7;
-          color: #16a34a;
-          border: 1px solid #86efac;
-        }
-        .gas-badge--no-data {
-          background: #f3f4f6;
-          color: #9ca3af;
-          border: 1px solid #e5e7eb;
-          font-weight: 400;
         }
         @keyframes gas-pulse {
           0%, 100% { opacity: 1; }
-          50%       { opacity: 0.65; }
+          50% { opacity: 0.65; }
         }
       `}</style>
       <span
-        className={`gas-badge ${isAlert ? 'gas-badge--alert' : 'gas-badge--ok'}`}
-        title={
-          isAlert
-            ? 'Sensor gas mendeteksi konsentrasi tinggi'
-            : 'Sensor gas dalam kondisi normal'
-        }
-        aria-label={isAlert ? 'Gas: ALERT' : 'Gas: OK'}
+        className={`gas-badge ${palette.pulse ? 'gas-badge--pulse' : ''}`}
+        title={title}
+        aria-label={label}
         aria-live="polite"
+        style={{
+          background: palette.bg,
+          color: palette.fg,
+          border: `1px solid ${palette.border}`,
+        }}
       >
-        {/* Dot indicator */}
         <span
           aria-hidden="true"
           style={{
             width: 6,
             height: 6,
             borderRadius: '50%',
-            background: isAlert ? '#dc2626' : '#16a34a',
+            background: palette.dot,
             display: 'inline-block',
             flexShrink: 0,
           }}
         />
-        {isAlert ? 'Gas: ALERT' : 'Gas: OK'}
+        {label}
       </span>
     </>
   );

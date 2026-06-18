@@ -3,15 +3,9 @@
 /**
  * GasIndicatorPill — Pill kecil status gas sensor.
  *
- * Beda dengan `GasAlertBadge`: komponen ini tidak melakukan polling sendiri.
- * Caller harus pass `entry` (GasTelemetryEntry | undefined) yang sudah
- * di-resolve dari sumber data terpusat (mis. dashboard home `gasLatestByNode`).
- *
- * Tujuan: menghindari polling duplikat saat dipasang di banyak lokasi
- * dalam satu page yang sudah punya state telemetri sendiri.
- *
- * Pakai `<GasAlertBadge>` (auto-poll) untuk page yang TIDAK punya state
- * telemetri sendiri (mis. /monitor).
+ * Caller harus pass `entry` yang sudah di-resolve dari sumber data terpusat.
+ * Komponen ini sekarang menampilkan nilai gas terakhir agar user bisa langsung
+ * melihat angka raw di card, bukan hanya status OK/ALERT.
  */
 
 interface GasTelemetryEntry {
@@ -25,9 +19,7 @@ interface GasTelemetryEntry {
 
 interface GasIndicatorPillProps {
   entry: GasTelemetryEntry | undefined;
-  /** Tampilkan dot saja (tanpa text). Default false. */
   compact?: boolean;
-  /** Batas waktu data dianggap fresh, ms. Default 5 menit. */
   freshnessLimitMs?: number;
 }
 
@@ -36,13 +28,12 @@ export default function GasIndicatorPill({
   compact = false,
   freshnessLimitMs = 5 * 60 * 1000,
 }: GasIndicatorPillProps) {
-  // Resolve status dari entry
-  let status: 'ok' | 'alert' | 'no-data' = 'no-data';
+  let status: 'ok' | 'alert' | 'stale' | 'no-data' = 'no-data';
   if (entry) {
     const age = Date.now() - new Date(entry.timestamp).getTime();
-    if (age <= freshnessLimitMs) {
-      status = entry.alert ? 'alert' : 'ok';
-    }
+    status = age <= freshnessLimitMs
+      ? (entry.alert ? 'alert' : 'ok')
+      : 'stale';
   }
 
   if (status === 'no-data') {
@@ -59,23 +50,33 @@ export default function GasIndicatorPill({
           className="w-1.5 h-1.5 rounded-full"
           style={{ background: '#9ca3af' }}
         />
-        {!compact && 'Gas: —'}
+        Gas: —
       </span>
     );
   }
 
-  const isAlert = status === 'alert';
-  const colors = isAlert
-    ? { bg: '#fee2e2', fg: '#dc2626', border: '#fca5a5', dot: '#dc2626' }
-    : { bg: '#dcfce7', fg: '#16a34a', border: '#86efac', dot: '#16a34a' };
+  const colors =
+    status === 'alert'
+      ? { bg: '#fee2e2', fg: '#dc2626', border: '#fca5a5', dot: '#dc2626', pulse: true }
+      : status === 'ok'
+      ? { bg: '#dcfce7', fg: '#16a34a', border: '#86efac', dot: '#16a34a', pulse: false }
+      : { bg: '#f3f4f6', fg: '#9ca3af', border: '#e5e7eb', dot: '#9ca3af', pulse: false };
+
+  const label = entry ? `Gas: ${entry.raw}` : 'Gas: —';
 
   return (
     <span
-      title={isAlert ? 'Sensor gas mendeteksi konsentrasi tinggi' : 'Sensor gas dalam kondisi normal'}
-      aria-label={isAlert ? 'Gas: ALERT' : 'Gas: OK'}
+      title={
+        status === 'stale'
+          ? `Data gas terakhir: ${entry?.raw ?? '—'} (lebih dari 5 menit lalu)`
+          : status === 'alert'
+          ? `Gas alert aktif. Nilai terakhir: ${entry?.raw ?? '—'}`
+          : `Sensor gas normal. Nilai terakhir: ${entry?.raw ?? '—'}`
+      }
+      aria-label={label}
       aria-live="polite"
       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
-        isAlert ? 'animate-pulse-dot' : ''
+        colors.pulse ? 'animate-pulse-dot' : ''
       }`}
       style={{
         background: colors.bg,
@@ -88,7 +89,7 @@ export default function GasIndicatorPill({
         className="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
         style={{ background: colors.dot }}
       />
-      {!compact && (isAlert ? 'Gas: ALERT' : 'Gas: OK')}
+      {!compact && label}
     </span>
   );
 }
