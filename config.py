@@ -78,6 +78,43 @@ WA_COOLDOWN_SECONDS: int = int(os.getenv("WA_COOLDOWN_SECONDS", "120"))
 SEND_FRAME_INTERVAL: float = 0.05
 
 # ============================================================
+# Detection Quality (lihat docs/plans/detection-quality-fix.md)
+# ============================================================
+# Jumlah frame BERTURUT-TURUT dengan violation sebelum publish MQTT/WA.
+# Default 5 frame (~0.25 detik di 20 FPS) — mengurangi false positive
+# akibat jitter satu-frame (motion blur, oklusi sementara).
+MIN_VIOLATION_STREAK: int = int(os.getenv("MIN_VIOLATION_STREAK", "5"))
+
+# Aktifkan inference half-precision (FP16) di GPU untuk percepatan 1.5–2×.
+# Otomatis di-disable saat CPU mode (CPU tidak support FP16 di YOLOv8).
+# Set USE_FP16=0 untuk debug atau kalau model tidak support half.
+USE_FP16: bool = os.getenv("USE_FP16", "1").strip() not in ("0", "false", "False", "")
+
+# Class-specific confidence threshold. Negative class (no_helmet, no_vest)
+# lebih rawan false positive (sering muncul di dada padahal harusnya di
+# kepala), jadi threshold-nya dinaikkan dibanding positive class.
+# HELMET_CONF default 0.55 setelah lapangan menemukan model false-positive
+# helmet di rambut/kepala dengan conf 0.41-0.57.
+HELMET_CONF: float = float(os.getenv("HELMET_CONF", "0.55"))
+VEST_CONF: float = float(os.getenv("VEST_CONF", "0.40"))
+NO_HELMET_CONF: float = float(os.getenv("NO_HELMET_CONF", "0.60"))
+NO_VEST_CONF: float = float(os.getenv("NO_VEST_CONF", "0.60"))
+
+# Sliding window untuk temporal smoothing. Dipakai di
+# ServiceAPDBackend.process_camera_node — alarm hanya publish kalau
+# minimal `VIOLATION_CONFIRM_FRAMES` dari `VIOLATION_WINDOW_FRAMES` frame
+# inference terakhir adalah violation dengan missing type yang sama.
+# Lebih tahan jitter daripada consecutive streak.
+VIOLATION_WINDOW_FRAMES: int = int(os.getenv("VIOLATION_WINDOW_FRAMES", "8"))
+VIOLATION_CONFIRM_FRAMES: int = int(os.getenv("VIOLATION_CONFIRM_FRAMES", "6"))
+
+# Interval (detik) Python me-refresh threshold dari `/api/settings`.
+# Operator yang ubah slider di dashboard akan ter-apply maks N detik
+# kemudian tanpa perlu restart backend.
+SETTINGS_REFRESH_INTERVAL_S: int = int(os.getenv("SETTINGS_REFRESH_INTERVAL_S", "300"))
+
+
+# ============================================================
 # WebSocket Server
 # ============================================================
 WEBSOCKET_HOST: str = os.getenv("WEBSOCKET_HOST", "0.0.0.0")

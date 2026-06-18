@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Server, AlertTriangle, ShieldCheck, Camera, Clock, Wind } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
+import GasIndicatorPill from '@/components/nodes/GasIndicatorPill';
 import { getYoloWebSocketUrl } from '@/lib/ws-url';
 
 interface NodeData {
@@ -391,13 +392,16 @@ export default function DashboardPage() {
                   )}
                 </div>
                 {/* Info */}
-                <div className="p-3 flex items-center justify-between">
-                  <span className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{node.sektorName}</span>
-                  {hasViolation && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--orange)', color: 'white' }}>
-                      {sectorViolationCounts[node.sektorId]}
-                    </span>
-                  )}
+                <div className="p-3 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold truncate flex-1" style={{ color: 'var(--text-primary)' }}>{node.sektorName}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <GasIndicatorPill entry={gasLatestByNode[node.id]} compact />
+                    {hasViolation && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--orange)', color: 'white' }}>
+                        {sectorViolationCounts[node.sektorId]}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -471,6 +475,7 @@ export default function DashboardPage() {
                 <tr>
                   <th className="px-3 py-2">Sektor</th>
                   <th className="px-3 py-2">PIC</th>
+                  <th className="px-3 py-2">Gas</th>
                   <th className="px-3 py-2">Pelanggaran Hari Ini</th>
                   <th className="px-3 py-2">Status</th>
                 </tr>
@@ -480,6 +485,13 @@ export default function DashboardPage() {
                   <tr key={node.id} className="cursor-pointer" onClick={() => router.push('/monitor')}>
                     <td className="px-3 py-2 font-medium">{node.sektorName}</td>
                     <td className="px-3 py-2">{node.picName}</td>
+                    <td className="px-3 py-2">
+                      {node.esp32?.gasSensorEnabled ? (
+                        <GasIndicatorPill entry={gasLatestByNode[node.id]} />
+                      ) : (
+                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <span className="font-bold" style={{ color: (sectorViolationCounts[node.sektorId] || 0) > 0 ? 'var(--orange)' : 'var(--success)' }}>
                         {sectorViolationCounts[node.sektorId] || 0}

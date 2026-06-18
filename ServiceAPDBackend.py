@@ -34,6 +34,16 @@ from ultralytics import YOLO
 # Konfigurasi terpusat dari .env
 import config
 
+# Pure helpers untuk filter deteksi (lihat docs/plans/detection-quality-fix.md)
+from detection_filters import (
+    AdaptiveSkip,
+    ViolationWindow,
+    estimate_visibility,
+    evaluate_person,
+    is_full_body_bbox,
+    should_publish_violation,
+)
+
 # =========================
 # Konfigurasi Logging
 # =========================
@@ -140,6 +150,54 @@ def get_registered_nodes():
     except Exception as e:
         logger.error(f"Fallback db.json juga gagal: {e}")
     return []
+
+
+def fetch_dashboard_settings():
+    """Ambil pengaturan threshold terbaru dari `/api/settings`.
+
+    Operator yang menggeser slider Confidence di halaman /settings
+    akan tersimpan ke DB. Backend Python perlu poll endpoint ini
+    secara periodik supaya nilai yang aktif di runtime ikut update
+    tanpa restart service. Lihat Wave 5 di
+    docs/plans/detection-quality-fix.tasks.md.
+
+    Returns
+    -------
+    dict | None
+        Subset pengaturan yang valid: ``{"confidenceThreshold": ...,
+        "personConfidence": ...}``. None kalau request gagal atau
+        response tidak valid (caller tetap pakai nilai lama).
+    """
+    if not APD_SERVICE_TOKEN:
+        return None
+    try:
+        url = f"{DASHBOARD_API_URL}/api/settings"
+        resp = requests.get(url, headers=DASHBOARD_HEADERS, timeout=5)
+        if resp.status_code != 200:
+            logger.debug(
+                f"[settings] GET /api/settings status={resp.status_code}, "
+                f"skip refresh"
+            )
+            return None
+        body = resp.json() if resp.headers.get("Content-Type", "").startswith("application/json") else None
+        if not isinstance(body, dict):
+            return None
+        system = body.get("system") or {}
+        out = {}
+        ct = system.get("confidenceThreshold")
+        pc = system.get("personConfidence")
+        if isinstance(ct, (int, float)) and 0 < float(ct) <= 1:
+            out["confidenceThreshold"] = float(ct)
+        if isinstance(pc, (int, float)) and 0 < float(pc) <= 1:
+            out["personConfidence"] = float(pc)
+        return out or None
+    except requests.exceptions.ConnectionError:
+        logger.debug("[settings] dashboard tidak tersedia, skip refresh")
+        return None
+    except Exception as e:
+        logger.warning(f"[settings] gagal refresh, pakai nilai lama: {e}")
+        return None
+
 
 def send_whatsapp_alert(phone: str, message: str, image_frame=None, camera_source="default"):
     """Mengirim pesan WA & gambar menggunakan GoWA REST API sesuai spesifikasi dokumentasi."""
@@ -262,6 +320,16 @@ COOLDOWN_SECONDS: int = config.COOLDOWN_SECONDS
 WA_COOLDOWN_SECONDS: int = config.WA_COOLDOWN_SECONDS
 SEND_FRAME_INTERVAL: float = config.SEND_FRAME_INTERVAL
 
+# Detection quality knobs (docs/plans/detection-quality-fix.md)
+MIN_VIOLATION_STREAK: int = config.MIN_VIOLATION_STREAK
+USE_FP16: bool = config.USE_FP16
+SETTINGS_REFRESH_INTERVAL_S: int = config.SETTINGS_REFRESH_INTERVAL_S
+
+# Sliding window untuk temporal smoothing — lebih tahan jitter daripada
+# consecutive streak (1 false-negative tidak reset window).
+VIOLATION_WINDOW_FRAMES: int = config.VIOLATION_WINDOW_FRAMES
+VIOLATION_CONFIRM_FRAMES: int = config.VIOLATION_CONFIRM_FRAMES
+
 USE_GPU: bool = True
 GPU_DEVICE_INDEX: int = config.GPU_DEVICE_INDEX
 PPE_MODEL_PATH: str = config.PPE_MODEL_PATH
@@ -273,6 +341,29 @@ VIOLATION_CLASSES = config.VIOLATION_CLASSES
 
 COLOR_SAFE = (0, 255, 0)        # Hijau
 COLOR_VIOLATION = (0, 0, 255)   # Merah
+COLOR_UNKNOWN = (0, 255, 255)   # Kuning — TIDAK DINILAI / partial body
+
+# Warna BGR untuk PPE class boxes (Wave 5.5 — visualisasi helm/vest).
+# Dipakai supaya operator bisa lihat apa yang model deteksi, bukan cuma
+# kotak person merah/hijau saja.
+COLOR_PPE = {
+    "helmet":     (0, 255, 255),    # Kuning — helm terdeteksi
+    "vest":       (255, 200, 0),    # Cyan — vest terdeteksi
+    "no_helmet":  (0, 165, 255),    # Orange — eksplisit no_helmet
+    "no_vest":    (255, 0, 255),    # Magenta — eksplisit no_vest
+}
+
+# Class-specific confidence threshold dari config.py / env.
+# Negatif (no_helmet/no_vest) lebih rawan false positive (sering muncul
+# di dada padahal harusnya di kepala), jadi threshold-nya dinaikkan.
+# Filter dilakukan di Python setelah inference karena YOLO predict cuma
+# terima 1 conf untuk semua class.
+PPE_CLASS_MIN_CONF = {
+    "helmet":    config.HELMET_CONF,
+    "vest":      config.VEST_CONF,
+    "no_helmet": config.NO_HELMET_CONF,
+    "no_vest":   config.NO_VEST_CONF,
+}
 
 WEBSOCKET_HOST: str = config.WEBSOCKET_HOST
 WEBSOCKET_PORT: int = config.WEBSOCKET_PORT
@@ -377,6 +468,19 @@ class APDDetectionService:
                 self.person_model.to(self.device)
                 gpu_name = torch.cuda.get_device_name(GPU_DEVICE_INDEX)
                 logger.info(f"Models loaded on GPU: {gpu_name}")
+
+                # Aktifkan FP16 (half-precision) di GPU untuk percepatan
+                # ~1.5–2× tanpa kehilangan akurasi signifikan untuk YOLOv8.
+                # Lihat docs/plans/detection-quality-fix.md (Wave 4).
+                if USE_FP16:
+                    try:
+                        self.model.model.half()
+                        self.person_model.model.half()
+                        logger.info("[model] FP16 enabled (half precision)")
+                    except Exception as e:
+                        logger.warning(
+                            f"[model] FP16 gagal di-enable, fallback ke FP32: {e}"
+                        )
             else:
                 # CPU fallback — lambat tapi jalan untuk testing
                 self.device = "cpu"
@@ -384,10 +488,71 @@ class APDDetectionService:
                 self.person_model = YOLO(PERSON_MODEL_PATH)
                 logger.warning("⚠ CUDA tidak tersedia. Berjalan di CPU mode (lambat, untuk testing).")
                 logger.warning("  Untuk performa optimal, gunakan laptop dengan GPU NVIDIA.")
+
+            # Verify class mapping cocok dengan PPE_CLASSES di config.
+            # Kalau model di-retrain dengan urutan class beda, label bisa
+            # kacau total tanpa ada error visible. Wajib cek saat startup.
+            self._verify_class_mapping()
+
             return True
         except Exception as e:
             logger.error(f"Failed to load YOLO models: {e}")
             return False
+
+    def _verify_class_mapping(self):
+        """Bandingkan model.names dengan config.PPE_CLASSES, lalu OVERRIDE
+        global PPE_CLASSES dari model.names (model adalah source of truth).
+
+        Tujuan: model yang di-retrain dengan urutan/jumlah class berbeda
+        tetap jalan tanpa edit config. Logic evaluate_person hanya peduli
+        nama class ('helmet', 'vest', 'no_helmet', 'no_vest') — kalau
+        model cuma punya subset (mis. tanpa no_helmet/no_vest), gate
+        akan auto-disable explicit-violation path untuk kelas yang absen.
+        """
+        global PPE_CLASSES
+        try:
+            model_names = getattr(self.model, "names", None) or {}
+            normalized = {int(k): str(v) for k, v in model_names.items()}
+            mismatch = [
+                (idx, normalized.get(idx), name)
+                for idx, name in PPE_CLASSES.items()
+                if normalized.get(idx) != name
+            ]
+            logger.info(f"[model] PPE class names dari model: {normalized}")
+            if mismatch:
+                logger.warning(
+                    f"[model] PPE class mapping MISMATCH dengan config.PPE_CLASSES — "
+                    f"OVERRIDE pakai model.names sebagai source of truth. "
+                    f"diff (id, model_name, config_name): {mismatch}."
+                )
+                PPE_CLASSES.clear()
+                PPE_CLASSES.update(normalized)
+                logger.info(f"[model] PPE_CLASSES sekarang: {PPE_CLASSES}")
+            else:
+                logger.info("[model] PPE class mapping cocok dengan config.PPE_CLASSES")
+
+            # Warn kalau model tidak punya class negative — explicit-violation
+            # path akan tidak aktif. Default-violation tetap jalan (helmet
+            # tidak terdeteksi → missing helmet).
+            available = set(normalized.values())
+            for negclass in ("no_helmet", "no_vest"):
+                if negclass not in available:
+                    logger.info(
+                        f"[model] Kelas '{negclass}' TIDAK ADA di model — "
+                        f"explicit-violation path untuk kelas ini disabled. "
+                        f"Default-violation tetap aktif (kalau positive class "
+                        f"tidak terdeteksi di full-body, dianggap missing)."
+                    )
+
+            person_names = getattr(self.person_model, "names", None) or {}
+            person_class_0 = person_names.get(0) if isinstance(person_names, dict) else None
+            if person_class_0 != "person":
+                logger.warning(
+                    f"[model] Person model class[0] = {person_class_0!r}, "
+                    f"diharapkan 'person'. Mungkin bukan model COCO standar?"
+                )
+        except Exception as e:
+            logger.warning(f"[model] gagal verify class mapping: {e}")
 
     # =========================
     # Gas telemetry helpers
@@ -624,8 +789,13 @@ class APDDetectionService:
         """Deteksi dengan Locking agar multi-thread tidak berebut GPU context"""
         try:
             with self.inference_lock:
-                ppe_results = self.model(frame, conf=CONFIDENCE_THRESHOLD, device=self.device, verbose=False)
-                person_results = self.person_model(frame, conf=PERSON_CONFIDENCE_THRESHOLD, device=self.device, classes=[0], verbose=False)
+                # half=True kalau FP16 aktif — speedup 1.5-2× di GPU.
+                # Argument tetap dikirim juga di CPU mode tapi diabaikan oleh YOLO.
+                _half_kwargs = {"half": True} if USE_FP16 and self.device.startswith("cuda") else {}
+                # Cast wide (conf rendah) untuk PPE — filter per-class di Python
+                # supaya bisa pakai threshold berbeda untuk positive vs negative.
+                ppe_results = self.model(frame, conf=min(PPE_CLASS_MIN_CONF.values()), device=self.device, verbose=False, **_half_kwargs)
+                person_results = self.person_model(frame, conf=PERSON_CONFIDENCE_THRESHOLD, device=self.device, classes=[0], verbose=False, **_half_kwargs)
 
             ppe_detections = []
             person_detections = []
@@ -636,23 +806,32 @@ class APDDetectionService:
                     for box in result.boxes:
                         class_id = int(box.cls[0])
                         class_name = PPE_CLASSES.get(class_id, f"class_{class_id}")
+                        conf = float(box.conf[0]) if box.conf is not None else 0.0
+                        # Class-specific threshold — no_helmet/no_vest harus
+                        # confidence tinggi untuk mengurangi false positive.
+                        min_conf = PPE_CLASS_MIN_CONF.get(class_name, CONFIDENCE_THRESHOLD)
+                        if conf < min_conf:
+                            continue
                         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                        ppe_detections.append({"class": class_name, "bbox": [x1, y1, x2, y2]})
+                        ppe_detections.append({"class": class_name, "bbox": [x1, y1, x2, y2], "conf": conf})
 
             for result in person_results:
                 if result.boxes is not None:
                     for box in result.boxes:
                         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                        person_detections.append({"class": "person", "bbox": [x1, y1, x2, y2]})
+                        conf = float(box.conf[0]) if box.conf is not None else 0.0
+                        person_detections.append({"class": "person", "bbox": [x1, y1, x2, y2], "conf": conf})
 
             safe_detections = []
             violation_detections = []
+            unknown_detections = []
 
             for person in person_detections:
                 px1, py1, px2, py2 = person["bbox"]
                 related_ppe = []
-                
-                # Cek intersection bounding box
+
+                # Cek intersection bounding box — PPE dianggap milik person
+                # ini kalau >= 35% area PPE overlap dengan area person.
                 for ppe in ppe_detections:
                     x1, y1, x2, y2 = ppe["bbox"]
                     overlap_w = max(0, min(x2, px2) - max(x1, px1))
@@ -662,33 +841,86 @@ class APDDetectionService:
                     if ppe_area > 0 and (overlap_area / ppe_area) >= 0.35:
                         related_ppe.append(ppe)
 
-                has_helmet = any(item["class"] == "helmet" for item in related_ppe)
-                has_vest = any(item["class"] == "vest" for item in related_ppe)
-                explicit_no_helmet = any(item["class"] == "no_helmet" for item in related_ppe)
-                explicit_no_vest = any(item["class"] == "no_vest" for item in related_ppe)
+                # Evaluasi 3-status — compliant/violation/unknown.
+                # Logic detail di detection_filters.evaluate_person:
+                # - estimate_visibility gate (partial body → unknown)
+                # - spatial zone validation (head/torso)
+                # - conflict resolver (helmet menang atas no_helmet palsu)
+                result = evaluate_person(person["bbox"], related_ppe, frame.shape)
 
-                missing = []
-                if explicit_no_helmet or not has_helmet: missing.append("helmet")
-                if explicit_no_vest or not has_vest: missing.append("vest")
+                fh, fw = frame.shape[:2]
+                bh = py2 - py1
+                bw = px2 - px1
+                logger.info(
+                    f"[detect] person bbox={px1},{py1},{px2},{py2} "
+                    f"h_ratio={bh/fh:.2f} aspect={bw/bh:.2f} "
+                    f"status={result['status']} reason={result['reason']} "
+                    f"missing={result['missing']} "
+                    f"valid={[p['class'] for p in result['valid_ppe']]} "
+                    f"ignored={[(p['class'], p.get('ignored_reason','')) for p in result['ignored_ppe']]}"
+                )
 
-                if missing:
-                    violation_detections.append({"class": "missing_" + "_".join(missing), "bbox": person["bbox"]})
-                    # Gambar Kotak Merah
+                if result["status"] == "compliant":
+                    safe_detections.append({"class": "apd_complete", "bbox": person["bbox"]})
+                    cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), COLOR_SAFE, 3)
+                    safe_label = "APD OK"
+                    (lw, lh), _ = cv2.getTextSize(safe_label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.rectangle(annotated_frame, (px1, py1 - lh - 10), (px1 + lw, py1), COLOR_SAFE, -1)
+                    cv2.putText(annotated_frame, safe_label, (px1, py1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                elif result["status"] == "violation":
+                    violation_detections.append({
+                        "class": "missing_" + "_".join(result["missing"]),
+                        "bbox": person["bbox"],
+                    })
                     cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), COLOR_VIOLATION, 3)
                     label = "APD TIDAK LENGKAP"
+                    sub = "Missing: " + ", ".join(result["missing"])
                     (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
                     cv2.rectangle(annotated_frame, (px1, py1 - lh - 10), (px1 + lw, py1), COLOR_VIOLATION, -1)
                     cv2.putText(annotated_frame, label, (px1, py1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    cv2.putText(annotated_frame, sub, (px1, py2 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_VIOLATION, 2)
                 else:
-                    safe_detections.append({"class": "apd_complete", "bbox": person["bbox"]})
+                    # unknown — kuning, dengan reason. JANGAN counted ke
+                    # safe maupun violation. JANGAN trigger publish.
+                    unknown_detections.append({
+                        "class": "unknown_" + result["reason"],
+                        "bbox": person["bbox"],
+                    })
+                    cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), COLOR_UNKNOWN, 2)
+                    label = "TIDAK DINILAI"
+                    sub = result["reason"]
+                    (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                    cv2.rectangle(annotated_frame, (px1, py1 - lh - 10), (px1 + lw, py1), COLOR_UNKNOWN, -1)
+                    cv2.putText(annotated_frame, label, (px1, py1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+                    cv2.putText(annotated_frame, sub, (px1, py2 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 200), 1)
 
-            # Jika tidak ada person, fallback ke deteksi object saja
+            # Jika tidak ada person, JANGAN auto-violation dari raw
+            # no_helmet/no_vest detection. Tanpa subjek (person bbox), kita
+            # tidak bisa apply zone validation, jadi raw detection gak cukup
+            # bukti untuk alarm. Hasil: empty lists (silent — tidak trigger
+            # MQTT/WA, tidak masuk safe_detections).
             if not person_detections:
-                safe_detections = [d for d in ppe_detections if d["class"] in SAFE_CLASSES]
-                violation_detections = [d for d in ppe_detections if d["class"] in VIOLATION_CLASSES]
+                safe_detections = []
+                violation_detections = []
 
-            cv2.putText(annotated_frame, f"APD OK: {len(safe_detections)} | Violation: {len(violation_detections)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,0), 2)
-            
+            # Gambar bbox semua PPE detection dengan confidence di label.
+            for ppe in ppe_detections:
+                pcls = ppe["class"]
+                pconf = ppe.get("conf", 0.0)
+                color = COLOR_PPE.get(pcls, (200, 200, 200))
+                qx1, qy1, qx2, qy2 = ppe["bbox"]
+                cv2.rectangle(annotated_frame, (qx1, qy1), (qx2, qy2), color, 2)
+                ppe_label = f"{pcls.replace('_', ' ')} {pconf:.2f}"
+                (plw, plh), _ = cv2.getTextSize(ppe_label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                cv2.rectangle(annotated_frame, (qx1, qy1 - plh - 6), (qx1 + plw + 4, qy1), color, -1)
+                cv2.putText(annotated_frame, ppe_label, (qx1 + 2, qy1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1)
+
+            cv2.putText(
+                annotated_frame,
+                f"OK: {len(safe_detections)} | Violation: {len(violation_detections)} | Unknown: {len(unknown_detections)}",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+            )
+
             return safe_detections, violation_detections, annotated_frame
 
         except Exception as e:
@@ -805,11 +1037,53 @@ class APDDetectionService:
         last_safe = []
         last_violations = []
         frame_count = 0
-        # Skip frames untuk hemat CPU — proses deteksi tiap N frame saja
-        DETECT_EVERY_N = 3 if not torch.cuda.is_available() else 1
+
+        # Per-thread state untuk Wave 3 (temporal smoothing).
+        # Sliding window 6/8 — lebih tahan jitter daripada consecutive streak.
+        # Push missing list per inference frame; alarm publish kalau confirmed
+        # missing dengan tipe sama muncul minimal 6/8 frame terakhir.
+        violation_window = ViolationWindow(
+            window_size=VIOLATION_WINDOW_FRAMES,
+            confirm_count=VIOLATION_CONFIRM_FRAMES,
+        )
+
+        # Adaptive frame skip (Wave 4). Target ~50ms latency = ~20 FPS.
+        # Min 1 di GPU, naikkan ke 3 di CPU agar lebih stabil.
+        _initial_min = 1 if torch.cuda.is_available() else 3
+        skip_controller = AdaptiveSkip(
+            target_latency_ms=50.0,
+            min_n=_initial_min,
+            max_n=5,
+            window=30,
+        )
+
+        # FPS counter (Wave 4.5) — log tiap 30 detik.
+        fps_t0 = time.time()
+        fps_frames = 0
+
+        # Settings live-reload state (Wave 5.3).
+        last_settings_refresh = 0.0
 
         while self.running:
             try:
+                # Periodic settings refresh — refresh tiap SETTINGS_REFRESH_INTERVAL_S detik.
+                # Operator yang ubah slider di /settings akan ter-apply paling
+                # lambat segini detik tanpa restart backend.
+                _now = time.time()
+                if _now - last_settings_refresh > SETTINGS_REFRESH_INTERVAL_S:
+                    settings = fetch_dashboard_settings()
+                    if settings:
+                        global CONFIDENCE_THRESHOLD, PERSON_CONFIDENCE_THRESHOLD
+                        if "confidenceThreshold" in settings:
+                            CONFIDENCE_THRESHOLD = settings["confidenceThreshold"]
+                        if "personConfidence" in settings:
+                            PERSON_CONFIDENCE_THRESHOLD = settings["personConfidence"]
+                        logger.info(
+                            f"[settings] refreshed: confidence={CONFIDENCE_THRESHOLD:.2f}, "
+                            f"person={PERSON_CONFIDENCE_THRESHOLD:.2f}"
+                        )
+                    last_settings_refresh = _now
+
                 ret, frame = cap.read()
                 if not ret:
                     logger.warning(f"[{sektor_name}] Stream putus. Mencoba reconnect...")
@@ -822,29 +1096,75 @@ class APDDetectionService:
 
                 frame_count += 1
                 
-                # Resize frame agar ringan (720p max)
+                # Resize frame agar ringan. CPU-only mode pakai 480px (lebih ringan
+                # ~30-40%); GPU mode pakai 720px untuk akurasi lebih tinggi.
                 h, w = frame.shape[:2]
-                if w > 720:
-                    scale = 720 / w
-                    frame = cv2.resize(frame, (720, int(h * scale)))
+                _max_width = 480 if not torch.cuda.is_available() else 720
+                if w > _max_width:
+                    scale = _max_width / w
+                    frame = cv2.resize(frame, (_max_width, int(h * scale)))
 
-                # Skip frame — hanya deteksi setiap N frame, sisanya kirim frame terakhir
-                if frame_count % DETECT_EVERY_N == 0:
+                # Adaptive skip — frequency dipilih oleh skip_controller berdasarkan
+                # avg latency 30 sample terakhir (Wave 4.4).
+                detect_n = skip_controller.current_n()
+                if frame_count % detect_n == 0:
+                    _t0 = time.perf_counter()
                     safe, violations, annotated_frame = self.detect_ppe(frame)
+                    _latency_ms = (time.perf_counter() - _t0) * 1000.0
+                    skip_controller.record(_latency_ms)
+
                     last_annotated = annotated_frame
                     last_safe = safe
                     last_violations = violations
+
+                    # Push hasil ke sliding window — HANYA di branch detection
+                    # (bukan carryover), supaya window represent frame yang
+                    # benar-benar di-inference.
+                    if len(violations) > 0:
+                        # Extract missing types dari violation classes:
+                        # "missing_helmet_vest" → ["helmet", "vest"]
+                        all_missing = []
+                        for v in violations:
+                            cls = v.get("class", "")
+                            if cls.startswith("missing_"):
+                                all_missing.extend(cls.replace("missing_", "").split("_"))
+                        violation_window.push(all_missing or None)
+                    else:
+                        violation_window.push([])
                 else:
                     annotated_frame = last_annotated if last_annotated is not None else frame
                     safe = last_safe
                     violations = last_violations
 
+                fps_frames += 1
+                if (time.time() - fps_t0) >= 30.0:
+                    elapsed = time.time() - fps_t0
+                    logger.info(
+                        f"[perf] {sektor_name} fps={fps_frames/elapsed:.1f} "
+                        f"skip_n={detect_n} avg_latency={skip_controller.avg_latency_ms:.1f}ms"
+                    )
+                    fps_t0 = time.time()
+                    fps_frames = 0
+
                 current_time = time.time()
                 has_violation = len(violations) > 0
 
                 # 1. Notifikasi Pelanggaran (MQTT & WA)
-                if has_violation and (current_time - last_notification_time) > COOLDOWN_SECONDS:
-                    violation_names = [v["class"].replace("_", " ") for v in violations]
+                # Sliding window 6/8 — alarm publish hanya kalau confirmed
+                # violation type sama muncul di minimal 6 dari 8 frame inference
+                # terakhir. Lebih tahan jitter daripada consecutive streak yang
+                # reset di 1 false-negative.
+                confirmed_missing = violation_window.confirmed_missing()
+                if (
+                    has_violation
+                    and confirmed_missing is not None
+                    and (current_time - last_notification_time) > COOLDOWN_SECONDS
+                ):
+                    violation_names = list(confirmed_missing)
+                    logger.info(
+                        f"[smoothing] confirmed missing={confirmed_missing} "
+                        f"window={violation_window.buffer_snapshot}"
+                    )
                     
                     # Kirim MQTT Alert Terenkripsi ke topic per-node (Requirement 3.1-3.3).
                     # Backend tidak lagi publish ke topic global `APD_Violation`. Setiap
@@ -911,6 +1231,9 @@ class APDDetectionService:
                         last_wa_notification_time = current_time
 
                     last_notification_time = current_time
+                    # Reset window supaya tidak loop publish — buffer akan
+                    # terisi kembali kalau frame berikutnya masih violation.
+                    violation_window.reset()
 
                 # 2. Kirim Frame Stream ke Dashboard (WebSocket)
                 if (current_time - last_frame_send_time) > SEND_FRAME_INTERVAL:
@@ -933,6 +1256,12 @@ class APDDetectionService:
                             "frame": frame_b64,
                             "violations": [v["class"] for v in violations],
                             "safe_items": [s["class"] for s in safe],
+                            # Counter detail untuk dashboard transparency.
+                            # UNKNOWN tidak boleh dianggap APD OK — operator
+                            # perlu lihat angka terpisah supaya tidak bingung
+                            # kalau jumlah orang di frame > safe + violation.
+                            "safe_count": len(safe),
+                            "violation_count": len(violations),
                             "timestamp": datetime.now().isoformat()
                         }
                         

@@ -1,0 +1,33 @@
+---
+plan name: gas-status-everywhere
+plan description: add gas badge to monitor and dashboard
+plan status: active
+---
+
+## Idea
+Memasang `GasAlertBadge` (sudah ada lengkap di `web-dashboard/src/components/nodes/GasAlertBadge.tsx:1-201`, auto-poll `/api/telemetry/gas` per 30s, handle no-data state) di tiga lokasi yang saat ini belum punya indikator gas:
+
+1. `/monitor` page card — di dalam blok kanan card (`web-dashboard/src/app/monitor/page.tsx:198-214`), antara violation count badge (line 201-205) dan "Live" pulse dot (line 207-213). Modal yang muncul saat klik card juga punya pill "MJPEG" di line 241-244 — gas pill bisa nyebelahan di sana.
+2. "Live Sektor Preview" card di dashboard home (`web-dashboard/src/app/page.tsx:359-411`, blok per-sektor preview tile) — saat ini cuma tampilin `node.sektorName` + violation count badge di line 394-401. Tambahin gas indicator di samping nama sektor.
+3. "Ringkasan Sektor" table di dashboard home (`web-dashboard/src/app/page.tsx:463-499`) — entah di Sektor cell (line 481) atau kolom baru antara PIC dan Pelanggaran.
+
+INFRASTRUCTURE EVIDENCE: data path lengkap sudah jalan. ESP32 firmware publish ke topic `apd/telemetry/gas/<nodeId>` tiap 2s saat alert atau heartbeat tiap 60s (`alarm_apd/alarm_apd.ino:1577-1635`, payload AES-encrypted JSON dengan field `raw`, `alert`, `gasThreshold`, `timestamp`). Backend Python subscribe wildcard `apd/telemetry/gas/+` di `ServiceAPDBackend.py:287, 534-573`, decrypt, dispatch ke `handle_gas_telemetry()` (line 412-483) yang forward ke `POST /api/telemetry/gas` (line 429-434). Endpoint ada di `web-dashboard/src/app/api/telemetry/gas/route.ts` POST line 27-67 (service-token, validate Zod, persist `prisma.gasTelemetry`) + GET line 69-91 (last 100 entries, sector-scoped). Permission map sudah register (`web-dashboard/src/lib/rbac/permission-map.ts:104-105`).
+
+JADI TIDAK BUTUH: endpoint baru, schema migration, perubahan Python, update permission-map. Kerjaan murni frontend wiring + drop-in component reuse.
+
+OPSIONAL ENHANCEMENT: dashboard home (`page.tsx:87-104`) sudah panggil `fetchGasTelemetry` sendiri tiap 15s dan punya `gasLatestByNode` map di line 187-196. Untuk sektor preview cards + ringkasan table, lebih efisien pakai data ini langsung daripada masing-masing render `<GasAlertBadge>` (yang punya polling sendiri = 1 polling per node × 3 lokasi). Pertimbangkan extract komponen presentational `<GasIndicatorPill data={gasLatestByNode[id]} />` yang menerima data dari parent — sementara `/monitor` page yang tidak punya gas state sendiri tetap pakai `<GasAlertBadge>` self-polling apa adanya.
+
+## Implementation
+- Audit `GasAlertBadge.tsx` (web-dashboard/src/components/nodes/GasAlertBadge.tsx:1-201) dan dokumentasikan API komponen: props yang diterima, polling behavior, no-data threshold (5 menit per kode existing), dan bagaimana dia handle gas telemetry endpoint response. Verifikasi tidak ada hardcoded asumsi yang break kalau dipasang di context selain NodeTable. Catat di plan apakah komponen butuh tweak (misal prop `compact` mode atau override polling interval) atau drop-in.
+- Refactor opsional: extract `GasIndicatorPill` presentational dari `GasAlertBadge`. Komponen baru terima prop `latest: GasTelemetry | null` + `staleMs: number` (default 5*60*1000). `GasAlertBadge` jadi wrapper yang melakukan polling sendiri dan render `<GasIndicatorPill>`. Tujuan: dashboard home yang sudah polling `gasLatestByNode` (page.tsx:87-104) bisa pakai pill langsung tanpa polling duplikat. Skip step ini kalau audit step 1 menunjukkan komponen sudah cukup ringan.
+- Tambah `<GasAlertBadge nodeId={node.id} />` di `/monitor` page card grid di `web-dashboard/src/app/monitor/page.tsx`. Posisi: dalam div flex `items-center gap-3` di line 198-214, sisipkan SEBELUM violation count badge (line 201) atau ANTARA violation badge dan Live dot (line 207). Test: `npx tsc --noEmit && npm run lint && npm test` dari web-dashboard/. Verifikasi pill muncul di card saat node punya gas data, tidak muncul (atau '—') saat tidak ada data.
+- Tambah gas indicator di modal MJPEG full-screen `/monitor` page (line 230-275 area). Pill MJPEG ada di line 241-244 — sebelahkan gas indicator di sana. Reuse `<GasAlertBadge>` atau `<GasIndicatorPill>` (kalau step 2 dijalankan). Pastikan layout responsive di mobile.
+- Tambah gas indicator di Live Sektor Preview cards di dashboard home (`web-dashboard/src/app/page.tsx:359-411`). Posisi: di samping `node.sektorName` (line 395) dalam div flex `items-center justify-between`. Karena home page sudah punya `gasLatestByNode` map (line 187-196), pakai `<GasIndicatorPill data={gasLatestByNode[node.id]} />` kalau step 2 dilakukan, atau lookup manual `gasLatestByNode[node.id]?.alert` dengan inline JSX dot kalau tidak (ikut style dot pulse yang sudah ada di line 331-339). PERTIMBANGAN: card kecil, pill jangan terlalu lebar.
+- Tambah kolom atau inline indicator di Ringkasan Sektor table (`web-dashboard/src/app/page.tsx:463-499`). Pilihan A: kolom baru 'Gas' antara 'PIC' (line 480-483) dan 'Pelanggaran' (line 484-491), header tambahin di line 466-475. Pilihan B: inline di cell Sektor (line 481) dengan dot kecil sebelum sektorName. Pilih A untuk visibility lebih baik, tapi pastikan lebar table tetap fit. Pakai sumber data sama (gasLatestByNode) untuk konsistensi dengan preview cards.
+- Verifikasi tidak ada regression di tempat-tempat yang sudah punya gas UI: stat card 'Gas Alert' (page.tsx:268-289), 'Status Sensor Gas (MQ-135)' strip (line 293-357). Tidak boleh ada double-rendering atau race condition antara polling existing (15s) dan polling tambahan dari GasAlertBadge (30s). Kalau step 2 dilakukan, semua tempat di home page pakai data dari fetch yang sama — hanya /monitor page yang masih self-polling.
+- Update tests existing kalau ada yang berkaitan: `web-dashboard/src/components/nodes/__tests__/GasAlertBadge.test.tsx` (kalau exist) — pastikan test coverage tidak break setelah refactor step 2. Tambah snapshot test atau RTL test untuk component baru `<GasIndicatorPill>`. Run `npx tsc --noEmit && npm run lint && npm test` dari web-dashboard/ — ini wajib per AGENTS.md verification rule sebelum declare done.
+- Smoke test E2E di hardware: trigger gas alert (semprot gas pemantik dekat MQ-135 atau `python trigger_alarm.py --gas` kalau script support gas-only mode). Verifikasi visual: (1) /monitor card pill berubah dari OK ke ALERT dalam 30 detik, (2) Live Sektor Preview cards di home update, (3) Ringkasan Sektor table baris yang relevan update. Setelah threshold turun, pastikan pill kembali OK. Catat di follow-ups.md pengamatan dan timing actual update.
+
+## Required Specs
+<!-- SPECS_START -->
+<!-- SPECS_END -->

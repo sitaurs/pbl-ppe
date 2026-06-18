@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Monitor, X, AlertTriangle, Camera, Shield, WifiOff } from 'lucide-react';
 import PageTransition from '@/components/PageTransition';
+import GasAlertBadge from '@/components/nodes/GasAlertBadge';
 
 interface MonitorNode {
   id: number;
@@ -147,7 +148,7 @@ export default function MonitorPage() {
         <div className="flex items-center gap-1.5">
           <AlertTriangle size={13} style={{ color: 'var(--orange)' }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--orange)' }}>{totalViolations}</span>
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>pelanggaran terdeteksi</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>pelanggaran tercatat</span>
         </div>
       </div>
 
@@ -200,9 +201,10 @@ export default function MonitorPage() {
                     <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{node.sektorName}</p>
                   </div>
                   <div className="flex items-center gap-3">
+                    <GasAlertBadge nodeId={node.id} />
                     {violationCount > 0 && (
                       <span className="text-[11px] font-bold px-2 py-1 rounded-lg" style={{ background: '#fef0e8', color: 'var(--orange)' }}>
-                        {violationCount} alert
+                        {violationCount} tercatat
                       </span>
                     )}
                     <div className="flex items-center gap-1.5">
@@ -238,6 +240,7 @@ export default function MonitorPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <GasAlertBadge nodeId={selectedCam.id} />
                 <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: '#f0faf5' }}>
                   <div className="w-1.5 h-1.5 rounded-full animate-pulse-dot" style={{ background: '#4ade80' }} />
                   <span className="text-[10px] font-bold uppercase" style={{ color: '#16a34a' }}>MJPEG</span>
@@ -267,7 +270,7 @@ export default function MonitorPage() {
                 <div className="flex items-center gap-1.5">
                   <Shield size={12} style={{ color: (violationCounts[selectedCam.id] || 0) > 0 ? 'var(--orange)' : 'var(--accent)' }} />
                   <span className="text-xs font-medium" style={{ color: (violationCounts[selectedCam.id] || 0) > 0 ? 'var(--orange)' : 'var(--accent)' }}>
-                    {(violationCounts[selectedCam.id] || 0) > 0 ? `${violationCounts[selectedCam.id] || 0} pelanggaran tercatat` : 'Semua aman'}
+                    {(violationCounts[selectedCam.id] || 0) > 0 ? `${violationCounts[selectedCam.id] || 0} pelanggaran tercatat` : 'Belum ada pelanggaran tercatat'}
                   </span>
                 </div>
               </div>
