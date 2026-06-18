@@ -225,6 +225,16 @@ def tick_metrics():
 #  PREFLIGHT CHECK
 # ══════════════════════════════════════════════════════════
 
+def _port_alive(host: str, port: int, timeout: float = 0.3) -> bool:
+    """Quick TCP connect probe — True kalau port listening."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            return s.connect_ex((host, port)) == 0
+    except Exception:
+        return False
+
+
 def preflight_check(force: bool = False) -> list[dict]:
     """Check all env vars and config readiness. Returns list of check items.
     Each item: {name, status ('ok'|'empty'|'missing'|'mismatch'), severity ('critical'|'optional'), value}
@@ -275,6 +285,15 @@ def preflight_check(force: bool = False) -> list[dict]:
     cf_status = "ok" if S.cf_tunnel_proc and S.cf_tunnel_proc.poll() is None else ("empty" if cf_installed else "missing")
     cf_val = S.cf_tunnel_url if S.cf_tunnel_url else ("installed" if cf_installed else "not installed")
     checks.append({"name": "Cloudflare Tunnel", "status": cf_status, "severity": "optional", "value": cf_val})
+
+    # Runtime port checks — service-level health (bukan cuma config).
+    # Berguna untuk lapor balik kalau service jalan tapi sebagian port mati.
+    nextjs_up = _port_alive("127.0.0.1", 3000)
+    ws_up     = _port_alive("127.0.0.1", 8765)
+    mjpeg_up  = _port_alive("127.0.0.1", 8766)
+    checks.append({"name": "Next.js Dashboard (:3000)", "status": "ok" if nextjs_up else "empty", "severity": "optional", "value": "listening" if nextjs_up else "not running"})
+    checks.append({"name": "Python WebSocket (:8765)",  "status": "ok" if ws_up else "empty",     "severity": "optional", "value": "listening" if ws_up else "not running"})
+    checks.append({"name": "Python MJPEG (:8766)",      "status": "ok" if mjpeg_up else "empty",  "severity": "optional", "value": "listening" if mjpeg_up else "not running"})
 
     S._preflight = checks
     S._preflight_t = now
